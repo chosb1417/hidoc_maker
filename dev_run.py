@@ -1,4 +1,4 @@
-"""개발용 실행 - .py 파일을 저장하면 입력창을 자동으로 껐다 다시 켬
+"""개발용 실행 - hidoc 폴더의 .py 파일을 저장하면 입력창을 자동으로 껐다 다시 켬
 
 python dev_run.py 로 실행하고, 끝낼 때는 이 창에서 Ctrl+C.
 추가 설치 없이 0.5초마다 파일 수정 시각을 비교함.
@@ -9,18 +9,18 @@ import sys
 import time
 from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parent
-MAIN = "purchase_request.py"
+ROOT_DIR = Path(__file__).resolve().parent
+WATCH_DIR = ROOT_DIR / "hidoc"
 INTERVAL = 0.5
 
 
 def snapshot() -> dict:
-    return {p: p.stat().st_mtime for p in APP_DIR.glob("*.py") if p.name != Path(__file__).name}
+    return {p: p.stat().st_mtime for p in WATCH_DIR.glob("*.py")}
 
 
 def start():
-    print(f"[dev_run] {MAIN} 실행")
-    return subprocess.Popen([sys.executable, MAIN], cwd=APP_DIR)
+    print("[dev_run] python -m hidoc 실행")
+    return subprocess.Popen([sys.executable, "-m", "hidoc"], cwd=ROOT_DIR)
 
 
 def stop(proc):

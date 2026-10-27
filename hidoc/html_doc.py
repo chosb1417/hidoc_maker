@@ -9,11 +9,13 @@ copy_html(doc, items) 로 호출. 복사할 때마다 output/preview.html 에도
 """
 
 from html import escape
-from pathlib import Path
 
 import win32clipboard
 
-PREVIEW_PATH = Path(__file__).resolve().parent / "output" / "preview.html"
+from .money import eul_reul, split_amount, won_to_korean
+from .settings import DEFAULT_SAVE_DIR
+
+PREVIEW_PATH = DEFAULT_SAVE_DIR / "preview.html"
 FONT = "font-family:'맑은 고딕','Malgun Gothic',sans-serif;"
 BASE_PX = 16
 NB = "&nbsp;"
@@ -55,8 +57,6 @@ def _td(s, width=None, align="center", bold=False, size=12, colspan=1):
 
 
 def build_html(doc: dict, items: list[dict]) -> str:
-    from purchase_request import split_amount, won_to_korean, eul_reul
-
     amounts = [split_amount(it["qty"], it["price"], it["vat"]) for it in items]
     total = sum(s + t for s, t in amounts)
     vat_note = " VAT포함" if doc.get("vat_note") else ""

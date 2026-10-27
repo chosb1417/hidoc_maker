@@ -5,6 +5,8 @@ build_hwp(doc, items, path) 로 호출. 한글이 설치된 PC에서만 동작.
 
 import win32com.client as win32
 
+from .money import eul_reul, split_amount, won_to_korean
+
 FONT = "맑은 고딕"
 BASE_PT = 12  # 기본 글자 크기 (16px = 12pt)
 GAP_PT = 10  # 빈 줄 높이. 붙임 표가 다음 쪽으로 밀리지 않도록 기본 크기보다 작게
@@ -155,8 +157,6 @@ class HwpWriter:
 
 
 def build_hwp(doc: dict, items: list[dict], path, pdf_path=None):
-    from purchase_request import split_amount, won_to_korean, eul_reul
-
     amounts = [split_amount(it["qty"], it["price"], it["vat"]) for it in items]
     total = sum(s + t for s, t in amounts)
 

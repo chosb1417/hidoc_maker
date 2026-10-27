@@ -5,7 +5,7 @@
 ## 실행
 
 - `실행.bat`을 더블클릭합니다. 필요한 것이 없으면 먼저 설치한 뒤 입력창이 뜹니다.
-- 또는 이 폴더에서 `python purchase_request.py`를 실행합니다.
+- 또는 이 폴더에서 `python -m hidoc`을 실행합니다.
 
 ### 필요한 것
 
@@ -19,18 +19,27 @@
 
 ## 파일 구성
 
-| 파일 | 역할 |
-|---|---|
-| `purchase_request.py` | 입력창(tkinter), 금액 계산, 저장 폴더 정리, 붙임 파일 복사 |
-| `hwp_doc.py` | 한글 자동화로 품의서 `.hwp` 작성 |
-| `html_doc.py` | 하이웍스 등 웹 편집기에 붙여넣을 HTML을 클립보드에 복사, `output/preview.html`에도 저장 |
-| `dev_run.py` | 개발용. `.py` 파일을 저장하면 입력창을 자동으로 다시 실행 |
-| `quote_reader.py` | 견적서(PDF·이미지)에서 견적처와 품목 읽기. 로컬 방식과 Claude API 방식 |
-| `실행.bat` | 더블클릭 실행용. Python·패키지 자동 설치, 한글 설치 여부 확인 |
-| `requirements.txt` | 필요한 파이썬 패키지 목록 |
-| `문의사항.md` | 담당자에게 확인할 품의서 작성 기준(부가세 처리, 할인 표기 등) |
-| `settings.json` | 이 PC 설정(저장 경로, 견적서 읽기 방식, Claude API 키). 자동으로 만들어지고 git에 올리지 않음 |
-| `samples/` | 시험용 견적서를 넣어 두는 폴더. git에 올리지 않음 |
+```
+hidoc_maker/
+├─ 실행.bat            더블클릭 실행용. Python·패키지 자동 설치, 한글 설치 여부 확인
+├─ dev_run.py          개발용. hidoc 폴더의 .py를 저장하면 입력창을 자동으로 다시 실행
+├─ requirements.txt    필요한 파이썬 패키지 목록
+├─ hidoc/              프로그램 코드
+│  ├─ __main__.py      python -m hidoc 으로 실행할 때 시작점
+│  ├─ app.py           입력창(tkinter)
+│  ├─ money.py         공급가액·세액 계산, 한글 금액, 을/를
+│  ├─ storage.py       저장 폴더 구조, 파일 이름, 붙임 파일 복사
+│  ├─ settings.py      폴더 위치, settings.json 읽기/쓰기
+│  ├─ hwp_doc.py       한글 자동화로 품의서 .hwp 작성
+│  ├─ html_doc.py      하이웍스용 HTML을 클립보드에 복사, output/preview.html에도 저장
+│  └─ quote_reader.py  견적서(PDF·이미지)에서 견적처와 품목 읽기 (로컬 / Claude API)
+├─ tests/              시험 코드 (python -m unittest)
+├─ docs/
+│  └─ 문의사항.md      담당자에게 확인할 품의서 작성 기준 (부가세 처리, 할인 표기 등)
+├─ output/             기본 저장 경로 (git 제외)
+├─ samples/            시험용 견적서 (git 제외)
+└─ settings.json       이 PC 설정: 저장 경로, 견적서 읽기 방식, Claude API 키 (자동 생성, git 제외)
+```
 
 ## 사용 방법
 
@@ -71,7 +80,7 @@
 ## 개발할 때 실시간으로 보기
 
 - **하이웍스용 HTML**: VS Code에서 `output/preview.html`을 열고 오른쪽 아래 `Go Live`(Live Server)를 누릅니다. 브라우저에 `http://127.0.0.1:5500/output/preview.html`이 뜨고, 입력창에서 `하이웍스용 복사`를 누를 때마다 자동으로 새로고침됩니다. 파일이 없으면 먼저 한 번 복사하세요.
-- **입력창**: `python dev_run.py`로 실행하면, 폴더 안의 `.py` 파일을 저장할 때마다 입력창이 꺼졌다 다시 켜집니다. 끝낼 때는 터미널에서 `Ctrl+C`. 다시 켜지면 입력한 내용은 지워집니다. 추가 설치는 필요 없습니다.
+- **입력창**: `python dev_run.py`로 실행하면, `hidoc` 폴더의 `.py` 파일을 저장할 때마다 입력창이 꺼졌다 다시 켜집니다. 끝낼 때는 터미널에서 `Ctrl+C`. 다시 켜지면 입력한 내용은 지워집니다. 추가 설치는 필요 없습니다.
 
 ## 세액 구분 (품목별)
 
@@ -139,15 +148,15 @@
 
 | 바꿀 것 | 위치 |
 |---|---|
-| 붙임 드롭다운 목록 | `purchase_request.py`의 `ATTACH_TYPES` |
-| 처음 열 때 들어가는 붙임 | `purchase_request.py`의 `DEFAULT_ATTACH` |
-| 기업 폴더에 둘 공통 서류 | `purchase_request.py`의 `COMPANY_DOCS` |
-| 붙임 표기 형식 (`[종류]이름 1부.`) | `purchase_request.py`의 `attach_line` |
-| 부가세율 | `purchase_request.py`의 `VAT_RATE` |
-| 견적내역 표 칸 너비(mm) | `hwp_doc.py`의 `COL_MM` |
-| 셀 안쪽 여백 | `hwp_doc.py`의 `CELL_MARGIN_MM` (견적내역 표는 가운데 정렬) |
-| 기본 글자 크기 (지금 12pt = 16px) | `hwp_doc.py`의 `BASE_PT` |
-| 글꼴, 문장, 줄 배치 | `hwp_doc.py`의 `FONT`, `build_hwp` |
+| 붙임 드롭다운 목록 | `hidoc/storage.py`의 `ATTACH_TYPES` |
+| 처음 열 때 들어가는 붙임 | `hidoc/storage.py`의 `DEFAULT_ATTACH` |
+| 기업 폴더에 둘 공통 서류 | `hidoc/storage.py`의 `COMPANY_DOCS` |
+| 붙임 표기 형식 (`[종류]이름 1부.`) | `hidoc/storage.py`의 `attach_line` |
+| 부가세율 | `hidoc/money.py`의 `VAT_RATE` |
+| 견적내역 표 칸 너비(mm) | `hidoc/hwp_doc.py`의 `COL_MM` |
+| 셀 안쪽 여백 | `hidoc/hwp_doc.py`의 `CELL_MARGIN_MM` (견적내역 표는 가운데 정렬) |
+| 기본 글자 크기 (지금 12pt = 16px) | `hidoc/hwp_doc.py`의 `BASE_PT` |
+| 글꼴, 문장, 줄 배치 | `hidoc/hwp_doc.py`의 `FONT`, `build_hwp` |
 
 ## 알아둘 점
 
@@ -179,9 +188,10 @@
 19. (2026-10-27) GitHub 저장소를 비공개(Private)로 변경
 20. (2026-10-27) 견적서 불러오기 추가(`quote_reader.py`). 로컬 방식(PDF 글자 + Windows OCR, 기본값)과 Claude API 방식 중 선택. 읽는 동안 창이 멈추지 않음. `settings.json`은 API 키가 들어가므로 git에서 제외, 시험용 `samples/` 폴더도 제외
 21. (2026-10-27) 실시간 확인용: 하이웍스용 복사 때 `output/preview.html` 저장(Live Server로 보기), `.py` 저장 시 입력창을 자동 재시작하는 `dev_run.py` 추가
+22. (2026-10-27) 폴더 구조 정리: 코드를 `hidoc/` 폴더로 옮기고 `python -m hidoc`으로 실행. 입력창 파일에 섞여 있던 금액 계산(`money.py`), 설정(`settings.py`), 저장·붙임 복사(`storage.py`)를 분리해 다른 모듈이 입력창 코드를 불러오지 않게 함. `purchase_request.py` → `hidoc/app.py`, `문의사항.md` → `docs/`. 금액 계산·견적서 규칙 시험(`tests/`, 16개) 추가
 
 ## 다음 할 일
 
 - 실제 견적서 샘플(`samples/`)로 로컬 방식 규칙 다듬기, Claude API 방식 실제 호출 시험 (지금은 직접 만든 시험용 견적서로만 확인)
-- 담당자 답변을 받으면 `문의사항.md` 기준으로 반영 (부가세 끝자리·계산 방식, 총계 단가 칸, 할인·단위, 날짜)
+- 담당자 답변을 받으면 `docs/문의사항.md` 기준으로 반영 (부가세 끝자리·계산 방식, 총계 단가 칸, 할인·단위, 날짜)
 - 미정: 4번 항목을 구매처(URL)/지급방식 중 고르기, 붙임 표기 형식, "주식회사 지아이랩" 바닥글

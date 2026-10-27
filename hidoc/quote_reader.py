@@ -13,6 +13,8 @@ import os
 import re
 from pathlib import Path
 
+from .money import split_amount
+
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
 OUR_COMPANY = ("지아이랩", "gailab")  # 견적을 받는 쪽. 견적처 후보에서 뺌
 OCR_WIDTH = 3300  # OCR 전에 이미지 가로를 이만큼 키움 (A4 약 400dpi). 작은 글자·쉼표 인식이 좋아짐
@@ -237,8 +239,6 @@ def _find_item(tokens, price_first):
 
 
 def _parse_rows(rows):
-    from purchase_request import split_amount
-
     warnings = []
     compact = [r.replace(" ", "") for r in rows]
     header = next((i for i, c in enumerate(compact) if "수량" in c and "단가" in c), None)

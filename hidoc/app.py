@@ -1,110 +1,24 @@
-"""hidoc maker - 품의서 한글(HWP) 생성기 (tkinter GUI, 한컴오피스 필요)
+"""hidoc maker 입력창 (tkinter). python -m hidoc 또는 실행.bat 으로 실행
 
-실행: python purchase_request.py  (또는 실행.bat 더블클릭)
-결과: 저장경로/기업명/
-        [사업자등록증]기업명.확장자, [통장사본]기업명.확장자   (기업 공통 서류)
-        YYMMDD/[품의서]기업명_YYMMDD.hwp, [견적서]기업명_YYMMDD.확장자 ...
+구매 내용을 입력받아 한글(.hwp) 품의서 생성, 하이웍스용 복사, 견적서 불러오기를 함.
+저장 폴더 구조는 storage.py 참고.
 """
 
-import json
 import os
-import re
-import shutil
 import datetime as dt
-import filecmp
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parent
-DEFAULT_SAVE_DIR = APP_DIR / "output"
-SETTINGS_PATH = APP_DIR / "settings.json"
-VAT_RATE = 0.1
-# 품목별 세액 처리: 별도 = 단가에 10% 추가 / 포함 = 단가에 부가세 포함 / 없음 = 면세
-VAT_MODES = ["별도", "포함", "없음"]
+from .money import VAT_MODES, split_amount
+from .settings import DEFAULT_SAVE_DIR, load_settings, update_settings
+from .storage import (ATTACH_TYPES, DEFAULT_ATTACH, attach_line, copy_attachments, copy_name, safe_filename,
+                      unique_path)
+
 # 견적서 읽기 방식: 화면 표시 -> quote_reader 의 mode
 READ_MODES = {"로컬 (무료)": "local", "Claude API": "claude"}
 QUOTE_FILETYPES = [("견적서", "*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff"), ("모든 파일", "*.*")]
-
-
-def split_amount(qty: int, price: int, mode: str) -> tuple[int, int]:
-    """한 품목의 (공급가액, 세액)"""
-    amount = qty * price
-    if mode == "별도":
-        return amount, round(amount * VAT_RATE)
-    if mode == "포함":
-        supply = round(amount / (1 + VAT_RATE))
-        return supply, amount - supply
-    return amount, 0
-ATTACH_TYPES = ["사업자등록증", "통장사본", "견적서", "거래명세서", "전자세금계산서", "계약서", "발주서", "검수확인서"]
-DEFAULT_ATTACH = ["사업자등록증", "통장사본", "견적서", "거래명세서", "전자세금계산서"]
-# 기업 폴더 바로 아래에 날짜 없이 저장하는 기업 공통 서류
-COMPANY_DOCS = {"사업자등록증", "통장사본"}
-
-
-def attach_line(kind: str, name: str, count: int) -> str:
-    """('견적서', '엠에스산업', 1) -> '[견적서]엠에스산업 1부.'"""
-    return f"[{kind}]{name} {count}부."
-
-
-# ---------------------------------------------------------------- 문자열 도우미
-def won_to_korean(amount: int) -> str:
-    """4125000 -> '사백일십이만오천'"""
-    if amount == 0:
-        return "영"
-    digits = "영일이삼사오육칠팔구"
-    small = ["", "십", "백", "천"]
-    big = ["", "만", "억", "조", "경"]
-    result = []
-    group = 0
-    while amount > 0:
-        chunk = amount % 10000
-        amount //= 10000
-        if chunk:
-            text = ""
-            for i in range(3, -1, -1):
-                d = (chunk // 10 ** i) % 10
-                if d:
-                    text += digits[d] + small[i]
-            result.insert(0, text + big[group])
-        group += 1
-    return "".join(result)
-
-
-def eul_reul(word: str) -> str:
-    """마지막 글자 받침에 맞는 목적격 조사"""
-    last = word.rstrip()[-1:] or " "
-    if "가" <= last <= "힣":
-        return "을" if (ord(last) - 0xAC00) % 28 else "를"
-    if last.isdigit():
-        return "을" if last in "013678" else "를"
-    return "을(를)"
-
-
-def load_settings() -> dict:
-    try:
-        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def save_settings(data: dict):
-    SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def unique_path(path: Path, taken: set) -> Path:
-    """이미 있는 파일이거나 이번에 쓴 이름이면 (2), (3)... 을 붙임"""
-    n, cand = 2, path
-    while cand in taken or cand.exists():
-        cand = path.with_name(f"{path.stem}({n}){path.suffix}")
-        n += 1
-    taken.add(cand)
-    return cand
-
-
-def safe_filename(text: str) -> str:
-    return re.sub(r'[\\/:*?"<>|\s]+', "_", text).strip("_")[:40] or "제목없음"
 
 
 # ---------------------------------------------------------------- GUI
@@ -163,7 +77,7 @@ class App(tk.Tk):
                             width=12, state="readonly")
         mode.pack(side="left")
         mode.bind("<<ComboboxSelected>>",
-                  lambda _e: save_settings({**load_settings(), "read_mode": READ_MODES[self.read_mode_var.get()]}))
+                  lambda _e: update_settings(read_mode=READ_MODES[self.read_mode_var.get()]))
         ttk.Button(quote, text="API 키…", command=self.set_api_key).pack(side="left", padx=(6, 0))
         self.quote_status = ttk.Label(quote, foreground="gray")
         self.quote_status.pack(side="left", padx=8)
@@ -290,11 +204,7 @@ class App(tk.Tk):
         return a["name"] or self.vendor_var.get().strip()
 
     def _copy_name(self, a, date):
-        """복사될 파일 이름: 기업 공통 서류는 [종류]기업명.확장자, 나머지는 [종류]기업명_YYMMDD.확장자"""
-        name = f"[{a['kind']}]{safe_filename(self._attach_name(a))}"
-        if a["kind"] not in COMPANY_DOCS:
-            name += f"_{date}"
-        return name + Path(a["src"]).suffix
+        return copy_name(a["kind"], self._attach_name(a), a["src"], date)
 
     def _attach_values(self, a):
         line = attach_line(a["kind"], self._attach_name(a), a["count"])
@@ -470,7 +380,7 @@ class App(tk.Tk):
             "비워 두고 확인을 누르면 저장된 키를 지웁니다.", show="*", parent=self)
         if key is None:
             return False
-        save_settings({**load_settings(), "anthropic_api_key": key.strip()})
+        update_settings(anthropic_api_key=key.strip())
         return bool(key.strip())
 
     def load_quote(self):
@@ -490,7 +400,7 @@ class App(tk.Tk):
 
         def work():
             try:
-                from quote_reader import read_quote
+                from .quote_reader import read_quote
                 result["data"] = read_quote(path, mode, api_key)
             except Exception as e:  # QuoteReadError 는 안내문, 그 밖은 예상 못 한 오류
                 result["error"] = e
@@ -605,7 +515,7 @@ class App(tk.Tk):
             return
         doc, items, _ = collected
         try:
-            from html_doc import copy_html
+            from .html_doc import copy_html
             copy_html(doc, items)
         except Exception as e:  # 다른 프로그램이 클립보드를 쓰는 중 등
             messagebox.showerror("복사 실패", f"클립보드에 복사하지 못했습니다.\n{e}")
@@ -633,7 +543,7 @@ class App(tk.Tk):
         except OSError as e:
             messagebox.showerror("저장 실패", f"폴더를 만들 수 없습니다.\n{folder}\n{e}")
             return
-        save_settings({**load_settings(), "save_dir": str(save_dir)})
+        update_settings(save_dir=str(save_dir))
 
         taken = set()
         path = unique_path(folder / f"[품의서]{safe_filename(vendor)}_{date}.hwp", taken)
@@ -641,26 +551,12 @@ class App(tk.Tk):
         self.config(cursor="watch")
         self.update()
         try:
-            from hwp_doc import build_hwp
+            from .hwp_doc import build_hwp
             if not build_hwp(doc, items, path):
                 messagebox.showerror("저장 실패", f"한글 파일을 저장하지 못했습니다.\n{path}")
                 return
-            # 기업 공통 서류는 기업 폴더에 [종류]기업명.확장자, 나머지는 날짜 폴더에 [종류]기업명_날짜.확장자
-            copied = []
-            for a in attaches:
-                if not a["src"]:
-                    continue
-                src = Path(a["src"])
-                if a["kind"] in COMPANY_DOCS:
-                    dest = company_dir / self._copy_name(a, date)
-                    if dest.exists() and filecmp.cmp(src, dest, shallow=False):
-                        copied.append(f"{dest.relative_to(company_dir)} (같은 파일이 있어 유지)")
-                        continue
-                    dest = unique_path(dest, taken)
-                else:
-                    dest = unique_path(folder / self._copy_name(a, date), taken)
-                shutil.copy2(src, dest)
-                copied.append(str(dest.relative_to(company_dir)))
+            copied = copy_attachments([(a["kind"], self._attach_name(a), a["src"]) for a in attaches],
+                                      company_dir, folder, date, taken)
         except PermissionError as e:
             messagebox.showerror("저장 실패", f"파일이 열려 있어 저장할 수 없습니다.\n{e.filename}")
             return
@@ -694,6 +590,3 @@ class App(tk.Tk):
         self._refresh()
         self._load_default_attach()
 
-
-if __name__ == "__main__":
-    App().mainloop()

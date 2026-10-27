@@ -33,7 +33,7 @@ echo 한글 파일 저장은 되지 않고, 하이웍스 복사만 사용할 수
 pause
 
 :run
-start "" pythonw purchase_request.py
+start "" pythonw -m hidoc
 exit /b 0
 
 :python_failed
