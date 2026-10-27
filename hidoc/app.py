@@ -10,6 +10,7 @@ from tkinter import ttk
 
 from .documents import DOCUMENTS
 from .settings_view import SettingsView
+from .widgets import enable_inline_ime
 
 APP_TITLE = "hidoc maker"
 
@@ -31,6 +32,7 @@ class MainWindow(tk.Tk):
         self._build_home()
         self._build_doc_page()
         self.home.pack(fill="both", expand=True, padx=10, pady=10)
+        enable_inline_ime(self)  # 한글 조합 중인 글자를 떠 있는 상자 대신 입력칸 본문 자리에 바로 표시
 
     # ------------------------------------------------ 첫 화면
     def _build_home(self):
