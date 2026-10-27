@@ -1,6 +1,6 @@
 """저장 폴더 구조, 파일 이름, 붙임 파일 복사
 
-저장경로/기업명/
+저장경로/hidoc_output/기업명/      (저장 경로를 어디로 고르든 hidoc_output 폴더를 만듦: settings.output_dir)
     [사업자등록증]기업명.확장자, [통장사본]기업명.확장자   (기업 공통 서류)
     YYMMDD/[품의서]기업명_YYMMDD.hwp, [견적서]기업명_YYMMDD.확장자 ...
 """
@@ -10,9 +10,17 @@ import re
 import shutil
 from pathlib import Path
 
-ATTACH_TYPES = ["사업자등록증", "통장사본", "견적서", "거래명세서", "전자세금계산서", "계약서", "발주서", "검수확인서"]
-# 기업 폴더 바로 아래에 날짜 없이 저장하는 기업 공통 서류
-COMPANY_DOCS = {"사업자등록증", "통장사본"}
+from .settings import get_setting
+
+
+def attach_types() -> list[str]:
+    """붙임 종류 드롭다운 목록 (설정 attach_types)"""
+    return list(get_setting("attach_types"))
+
+
+def company_docs() -> set[str]:
+    """기업 폴더 바로 아래에 날짜 없이 저장하는 기업 공통 서류 (설정 company_docs)"""
+    return set(get_setting("company_docs"))
 
 
 def attach_line(kind: str, name: str, count: int) -> str:
@@ -37,7 +45,7 @@ def unique_path(path: Path, taken: set) -> Path:
 def copy_name(kind: str, name: str, src: str, date: str) -> str:
     """복사될 파일 이름: 기업 공통 서류는 [종류]기업명.확장자, 나머지는 [종류]기업명_YYMMDD.확장자"""
     result = f"[{kind}]{safe_filename(name)}"
-    if kind not in COMPANY_DOCS:
+    if kind not in company_docs():
         result += f"_{date}"
     return result + Path(src).suffix
 
@@ -47,11 +55,12 @@ def copy_attachments(attaches: list[tuple[str, str, str]], company_dir: Path, fo
     """(종류, 이름, 원본 경로) 목록을 복사하고, 기업 폴더 기준 결과 목록을 돌려줌.
     기업 공통 서류는 기업 폴더에(같은 파일이 이미 있으면 그대로 둠), 나머지는 날짜 폴더에 저장"""
     copied = []
+    shared = company_docs()
     for kind, name, src in attaches:
         if not src:
             continue
         src = Path(src)
-        if kind in COMPANY_DOCS:
+        if kind in shared:
             dest = company_dir / copy_name(kind, name, src, date)
             if dest.exists() and filecmp.cmp(src, dest, shallow=False):
                 copied.append(f"{dest.relative_to(company_dir)} (같은 파일이 있어 유지)")

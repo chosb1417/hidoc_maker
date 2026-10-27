@@ -5,7 +5,7 @@ build_hwp(doc, items, path) 로 호출. 한글이 설치된 PC에서만 동작.
 
 import win32com.client as win32
 
-from .money import eul_reul, split_amount, won_to_korean
+from .money import eul_reul, payment_lines, split_amount, won_to_korean
 
 FONT = "맑은 고딕"
 BASE_PT = 12  # 기본 글자 크기 (16px = 12pt)
@@ -224,11 +224,13 @@ def build_hwp(doc: dict, items: list[dict], path, pdf_path=None):
         w.enter()
         w.line()
 
-        w.line(f"4. 지급방식 : {doc['payment']}", left_mm=INDENT_MM)
-        for ln in doc["payment_detail"]:
-            w.line(ln if ln.startswith("-") else f"- {ln}", left_mm=INDENT_MM)
+        # 4. 지급방식: 입력하지 않았으면 항목을 빼고 빈 줄만 맞춤
+        lines = payment_lines(doc["payment"], doc["payment_detail"])
+        for ln in lines:
+            w.line(ln, left_mm=INDENT_MM)
         w.line()
-        w.line()
+        if lines:
+            w.line()
 
         # 붙임: 테두리 없는 (붙임 수)x2 표, 첫 줄에만 '붙 임 :'
         attach = doc["attach"]

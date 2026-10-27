@@ -39,6 +39,15 @@ def won_to_korean(amount: int) -> str:
     return "".join(result)
 
 
+def payment_lines(payment: str, details: list[str]) -> list[str]:
+    """품의서 4번 지급방식 항목의 줄들. 지급방식과 상세가 모두 비면 [] (항목을 넣지 않음).
+    상세만 있으면 '4. 지급방식' 제목 아래 상세만 넣음. 상세 줄 앞에는 '- '를 붙임"""
+    if not payment and not details:
+        return []
+    head = f"4. 지급방식 : {payment}" if payment else "4. 지급방식"
+    return [head] + [ln if ln.startswith("-") else f"- {ln}" for ln in details]
+
+
 def eul_reul(word: str) -> str:
     """마지막 글자 받침에 맞는 목적격 조사"""
     last = word.rstrip()[-1:] or " "

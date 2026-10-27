@@ -5,17 +5,17 @@
 - 모든 글자와 공백을 크기·굵기를 지정한 span 안에 넣음
 - 표 너비는 % 와 width 속성, 굵게는 <b>, 정렬은 align 속성으로도 함께 지정
 - 테두리 없는 칸(제목, 붙임)은 표 대신 문단으로 작성
-copy_html(doc, items) 로 호출. 복사할 때마다 output/preview.html 에도 저장 (Live Server 로 미리보기).
+copy_html(doc, items) 로 호출. 복사할 때마다 프로그램 폴더의 hidoc_output/preview.html 에도 저장 (Live Server 로 미리보기).
 """
 
 from html import escape
 
 import win32clipboard
 
-from .money import eul_reul, split_amount, won_to_korean
-from .settings import DEFAULT_SAVE_DIR
+from .money import eul_reul, payment_lines, split_amount, won_to_korean
+from .settings import DEFAULT_SAVE_DIR, output_dir
 
-PREVIEW_PATH = DEFAULT_SAVE_DIR / "preview.html"
+PREVIEW_PATH = output_dir(DEFAULT_SAVE_DIR) / "preview.html"  # 개발용 미리보기라 저장 경로 설정과 상관없이 프로그램 폴더
 FONT = "font-family:'맑은 고딕','Malgun Gothic',sans-serif;"
 BASE_PX = 16
 NB = "&nbsp;"
@@ -99,10 +99,10 @@ def build_html(doc: dict, items: list[dict]) -> str:
                + "".join(f"<tr>{r}</tr>" for r in rows) + "</table>")
     out.append(_p())
 
-    out.append(_p(f"4. 지급방식 : {doc['payment']}", indent=True))
-    for ln in doc["payment_detail"]:
-        out.append(_p(ln if ln.startswith("-") else f"- {ln}", indent=True))
-    out += [_p(), _p()]
+    # 4. 지급방식: 입력하지 않았으면 항목을 빼고 빈 줄만 맞춤
+    lines = payment_lines(doc["payment"], doc["payment_detail"])
+    out += [_p(ln, indent=True) for ln in lines]
+    out += [_p(), _p()] if lines else [_p()]
 
     # 붙임: 표 대신 문단. 둘째 줄부터는 '붙    임 :' 너비만큼 공백
     attach = doc["attach"]

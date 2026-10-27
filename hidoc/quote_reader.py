@@ -19,9 +19,12 @@ import tempfile
 from pathlib import Path
 
 from .money import split_amount
+from .settings import get_setting
+
+# 읽기 방식: 화면 표시 -> read_quote 의 mode (설정 read_mode 에는 오른쪽 값이 저장됨)
+READ_MODES = {"로컬 (무료)": "local", "Claude Code (구독)": "claude_code", "Claude API": "claude"}
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
-OUR_COMPANY = ("지아이랩", "gailab")  # 견적을 받는 쪽. 견적처 후보에서 뺌
 OCR_WIDTH = 3300  # OCR 전에 이미지 가로를 이만큼 키움 (A4 약 400dpi). 작은 글자·쉼표 인식이 좋아짐
 MIN_TEXT_CHARS = 30  # PDF에서 뽑힌 글자가 이보다 적으면 스캔본으로 보고 OCR
 ROW_TOLERANCE = 0.6  # 글자 높이의 이 비율 안에 있으면 같은 줄
@@ -30,7 +33,7 @@ TOTAL_WORDS = ("합계", "총계", "소계", "공급가액", "부가세", "세�
 
 CLAUDE_MODEL = "claude-opus-5-5"
 CLAUDE_PROMPT = """첨부한 견적서에서 구매 품의서 작성에 필요한 내용을 뽑아 주세요.
-- vendor: 견적을 낸 회사(공급자)의 상호. 견적을 받는 회사(주식회사 지아이랩)는 아님. "㈜"는 "(주)"로 적음
+- vendor: 견적을 낸 회사(공급자)의 상호. 견적을 받는 회사({company})는 아님. "㈜"는 "(주)"로 적음
 - target: 무엇을 사는지 짧은 이름 (예: "서버용 SSD", "G.Eye-Parking H100 설계 및 제작")
 - items: 견적 품목 한 줄마다 하나. 합계·소계·부가세 줄은 넣지 않음
   - name: 품명. 규격이 따로 있으면 품명 뒤에 한 칸 띄우고 붙임
@@ -205,7 +208,8 @@ def _company(text):
     text = text.replace("㈜", "(주)").strip(" :：.,·-")
     while text.startswith("(") and text.count("(") > text.count(")"):  # OCR이 붙인 짝 없는 괄호
         text = text[1:]
-    return "" if any(c in text.lower() for c in OUR_COMPANY) else text
+    ours = [name.lower() for name in get_setting("company_names")]  # 견적을 받는 우리 회사는 견적처가 아님
+    return "" if any(name in text.lower() for name in ours) else text
 
 
 def _find_vendor(rows):
@@ -334,7 +338,7 @@ def _read_claude(path: Path, api_key: str):
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",  # 안전 필터가 거절하면 서버가 다른 모델로 다시 시도
             output_config={"effort": "medium", "format": {"type": "json_schema", "schema": CLAUDE_SCHEMA}},
-            messages=[{"role": "user", "content": [block, {"type": "text", "text": CLAUDE_PROMPT}]}],
+            messages=[{"role": "user", "content": [block, {"type": "text", "text": _claude_prompt()}]}],
         )
     except anthropic.AuthenticationError:
         raise QuoteReadError("Claude API 키가 올바르지 않습니다. [API 키…]로 다시 넣어 주세요.")
@@ -359,6 +363,11 @@ def _read_claude(path: Path, api_key: str):
     except ValueError:
         raise QuoteReadError("Claude API 응답을 해석하지 못했습니다. 다시 시도하세요.")
     return _from_claude(data)
+
+
+def _claude_prompt():
+    """견적을 받는 우리 회사 이름(설정 company_names)을 넣은 안내문"""
+    return CLAUDE_PROMPT.format(company=", ".join(get_setting("company_names")))
 
 
 def _from_claude(data):
@@ -410,16 +419,26 @@ def start_claude_code_login():
                             creationflags=subprocess.CREATE_NEW_CONSOLE)
 
 
-def _read_claude_code(path: Path):
+def claude_code_status():
+    """Claude Code 설치·로그인 상태. {"exe": 경로 또는 None, "loggedIn", "authMethod", "subscriptionType", "email", ...}
+    입력창(견적서 읽기 전)과 설정 탭(환경 점검)에서 함께 씀. 1초 안팎 걸림"""
     exe = find_claude_code()
+    if not exe:
+        return {"exe": None, "loggedIn": False}
+    try:
+        status = json.loads(_run_claude_code([exe, "auth", "status"], timeout=30).stdout or "{}")
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        status = {}
+    return {"loggedIn": False, **status, "exe": exe}
+
+
+def _read_claude_code(path: Path):
+    status = claude_code_status()
+    exe = status["exe"]
     if not exe:
         raise ClaudeCodeNotInstalled("이 PC에 Claude Code가 설치되어 있지 않습니다.\n"
                                      "설치 없이 쓰려면 읽기 방식을 '로컬 (무료)'로 바꾸세요.")
     # 구독 로그인인지 확인 (API 키로 로그인돼 있으면 API 요금이 나가므로 막음)
-    try:
-        status = json.loads(_run_claude_code([exe, "auth", "status"], timeout=30).stdout or "{}")
-    except (ValueError, subprocess.TimeoutExpired):
-        status = {}
     if not status.get("loggedIn"):
         raise ClaudeCodeLoginRequired("Claude Code에 로그인되어 있지 않습니다.\n"
                                       "로그인하지 않고 쓰려면 읽기 방식을 '로컬 (무료)'로 바꾸세요.")
@@ -434,7 +453,7 @@ def _read_claude_code(path: Path):
             with Image.open(path) as img:
                 img.save(converted)
             path = converted
-        prompt = f"Read 도구로 이 견적서 파일을 읽으세요: {path}\n\n{CLAUDE_PROMPT}"
+        prompt = f"Read 도구로 이 견적서 파일을 읽으세요: {path}\n\n{_claude_prompt()}"
         args = [exe, "-p", prompt,
                 "--output-format", "json",
                 "--json-schema", json.dumps(CLAUDE_SCHEMA, ensure_ascii=False),
