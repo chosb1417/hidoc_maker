@@ -23,6 +23,8 @@ from .settings import get_setting
 
 # 읽기 방식: 화면 표시 -> read_quote 의 mode (설정 read_mode 에는 오른쪽 값이 저장됨)
 READ_MODES = {"로컬 (무료)": "local", "Claude Code (구독)": "claude_code", "Claude API": "claude"}
+# 화면 목록에 보이는 방식. Claude API 는 숨김 (settings.json 에 read_mode "claude" 와 anthropic_api_key 를 적으면 사용 가능)
+SHOWN_READ_MODES = [label for label, mode in READ_MODES.items() if mode != "claude"]
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
 OCR_WIDTH = 3300  # OCR 전에 이미지 가로를 이만큼 키움 (A4 약 400dpi). 작은 글자·쉼표 인식이 좋아짐
@@ -157,7 +159,7 @@ def _ocr_words(img):
     engine = OcrEngine.try_create_from_language(Language("ko"))
     if engine is None:
         raise QuoteReadError("Windows 한국어 OCR을 쓸 수 없습니다.\n"
-                             "설정 > 시간 및 언어 > 언어에서 한국어를 추가하거나, Claude API 방식을 쓰세요.")
+                             "설정 > 시간 및 언어 > 언어에서 한국어를 추가하거나, Claude Code 방식을 쓰세요.")
     img = img.convert("RGBA")
     if img.width < OCR_WIDTH:
         img = img.resize((OCR_WIDTH, round(img.height * OCR_WIDTH / img.width)), Image.LANCZOS)

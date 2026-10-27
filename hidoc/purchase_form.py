@@ -12,12 +12,13 @@ from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 
 from .money import VAT_MODES, split_amount
-from .quote_reader import READ_MODES
+from .quote_reader import READ_MODES, SHOWN_READ_MODES
 from .settings import DEFAULT_SAVE_DIR, get_setting, output_dir, update_settings
 from .storage import (attach_line, attach_types, company_folders, copy_attachments, copy_name, safe_filename,
                       unique_path)
 from .widgets import add_placeholder, add_suggestions, ask_api_key
 
+NOTICE_COLOR = "#b45309"  # 주황: 안내·확인할 점
 QUOTE_FILETYPES = [("견적서", "*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff"), ("모든 파일", "*.*")]
 
 
@@ -85,15 +86,19 @@ class PurchaseRequestForm(ttk.Frame):
         self.quote_btn = ttk.Button(quote, text="견적서 불러오기…", command=self.load_quote)
         self.quote_btn.pack(side="left")
         ttk.Label(quote, text="읽기 방식").pack(side="left", padx=(12, 4))
-        mode = ttk.Combobox(quote, textvariable=self.read_mode_var, values=list(READ_MODES),
+        mode = ttk.Combobox(quote, textvariable=self.read_mode_var, values=SHOWN_READ_MODES,
                             width=17, state="readonly")
         mode.pack(side="left")
         mode.bind("<<ComboboxSelected>>",
                   lambda _e: update_settings(read_mode=READ_MODES[self.read_mode_var.get()]))
-        self.quote_status = ttk.Label(quote, foreground="gray")
-        self.quote_status.pack(side="left", padx=8)
         ttk.Label(frm, text="PDF·이미지에서 견적처와 품목을 읽어 채움", foreground="gray").grid(
             row=row, column=2, sticky="w", padx=8)
+        # 아래 줄: 읽는 동안은 진행 막대 + 상태(_busy), 끝나면 불러온 결과·확인할 점 (확인 창 대신)
+        note_row = ttk.Frame(frm)
+        note_row.grid(row=row + 1, column=1, columnspan=2, sticky="w")
+        self.quote_progress = ttk.Progressbar(note_row, mode="indeterminate", length=120)
+        self.quote_note = ttk.Label(note_row, foreground=NOTICE_COLOR, justify="left", wraplength=860)
+        self.quote_note.pack(side="left")
 
     def _build_items(self):
         frm = ttk.LabelFrame(self, text=" 견적내역 ", padding=8)
@@ -383,11 +388,16 @@ class PurchaseRequestForm(ttk.Frame):
 
     # ------------------------------------------------ 견적서 읽기
     def load_quote(self):
+        # 지워질 견적내역이 있으면 파일을 고르기 전에 미리 알림 (읽은 뒤에는 묻지 않고 바로 채움)
+        if self.items and not messagebox.askokcancel(
+                "견적서 불러오기", f"견적서를 불러오면 지금 견적내역(품목 {len(self.items)}개)은 지워지고\n"
+                "견적서 내용으로 바뀝니다. 계속할까요?", icon="warning", parent=self):
+            return
         mode = READ_MODES[self.read_mode_var.get()]
         api_key = get_setting("anthropic_api_key")
         if mode == "claude" and not (api_key or os.environ.get("ANTHROPIC_API_KEY")):
             messagebox.showinfo("API 키 필요", "Claude API 방식은 API 키가 필요합니다.\n"
-                                "설정 탭에서도 넣거나 바꿀 수 있습니다.", parent=self)
+                                "(이 방식은 화면에서 숨겨져 있고 settings.json 으로만 켤 수 있습니다.)", parent=self)
             if not ask_api_key(self):
                 return
             api_key = get_setting("anthropic_api_key")
@@ -399,8 +409,15 @@ class PurchaseRequestForm(ttk.Frame):
     def _busy(self, text):
         """견적서 읽기·로그인 대기 중 표시. text 가 비면 원래대로"""
         self.quote_btn.state(["disabled"] if text else ["!disabled"])
-        self.quote_status.config(text=text)
         self.winfo_toplevel().config(cursor="watch" if text else "")
+        if text:
+            self.quote_progress.pack(side="left", before=self.quote_note, padx=(0, 8), pady=2)
+            self.quote_progress.start(12)
+            self.quote_note.config(text=text, foreground="gray")
+        else:
+            self.quote_progress.stop()
+            self.quote_progress.pack_forget()
+            self.quote_note.config(text="", foreground=NOTICE_COLOR)
 
     def _start_quote(self, path, mode, api_key):
         # 읽는 동안 창이 멈추지 않도록 따로 실행하고 끝날 때까지 확인
@@ -413,7 +430,7 @@ class PurchaseRequestForm(ttk.Frame):
             except Exception as e:  # QuoteReadError 는 안내문, 그 밖은 예상 못 한 오류
                 result["error"] = e
 
-        self._busy("읽는 중…")
+        self._busy("견적서 읽는 중…")
         thread = threading.Thread(target=work, daemon=True)
         thread.start()
         self._wait_quote(thread, (path, mode, api_key), result)
@@ -469,24 +486,12 @@ class PurchaseRequestForm(ttk.Frame):
         self._start_quote(*job)
 
     def _apply_quote(self, path, data):
+        """읽은 내용을 묻지 않고 바로 채움 (기존 견적내역은 지움 - 버튼 옆에 미리 안내). 확인할 점은 아래 줄에 표시"""
         items = data["items"]
-        if not items:
-            hint = "Claude 방식으로 다시 읽거나 " if READ_MODES[self.read_mode_var.get()] == "local" else ""
-            messagebox.showwarning("견적서 읽기", f"견적서에서 품목을 찾지 못했습니다.\n{hint}직접 입력해 주세요.\n\n"
-                                   + "\n".join(data["warnings"]), parent=self)
-            return
-        lines = [f"견적처 : {data['vendor'] or '(찾지 못함)'}"]
-        if data["target"]:
-            lines.append(f"구매대상 : {data['target']}")
-        lines.append(f"품목 {len(items)}개")
-        lines += [f"  {it['name']}  {it['qty']:,} x {it['price']:,}원 ({it['vat']})" for it in items[:10]]
-        if len(items) > 10:
-            lines.append(f"  … 외 {len(items) - 10}개")
-        if data["warnings"]:
-            lines += ["", "확인할 점"] + [f"  - {w}" for w in data["warnings"]]
-        if self.items:
-            lines += ["", "지금 입력된 견적내역은 지우고 새로 채웁니다."]
-        if not messagebox.askyesno("견적서 읽기 결과", "\n".join(lines) + "\n\n입력창에 채울까요?", parent=self):
+        if not items:  # 채울 것이 없으면 지금 입력은 그대로 둠
+            hint = "Claude Code 방식으로 다시 읽거나 " if READ_MODES[self.read_mode_var.get()] == "local" else ""
+            self.quote_note.config(text=" / ".join([f"견적서에서 품목을 찾지 못했습니다. {hint}직접 입력해 주세요. "
+                                                    "(지금 견적내역은 그대로입니다)"] + data["warnings"]))
             return
 
         if data["vendor"]:
@@ -508,6 +513,11 @@ class PurchaseRequestForm(ttk.Frame):
                 self.attach_tree.item(slot, values=self._attach_values(self.attaches[slot]))
             else:
                 self._insert_attach({"kind": "견적서", "name": "", "count": 1, "src": path})
+
+        note = f"{Path(path).name} 불러옴: 견적처 {data['vendor'] or '(찾지 못함 - 직접 입력)'}, 품목 {len(items)}개"
+        if data["warnings"]:
+            note += "\n확인할 점: " + " / ".join(data["warnings"])
+        self.quote_note.config(text=note)
 
     # ------------------------------------------------ 생성
     @staticmethod
@@ -627,4 +637,5 @@ class PurchaseRequestForm(ttk.Frame):
         self._refresh()
         self.detail_txt.delete("1.0", "end")
         self._reset_attach()
+        self.quote_note.config(text="")
 

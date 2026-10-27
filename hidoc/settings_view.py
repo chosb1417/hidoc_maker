@@ -9,9 +9,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 from .environment import run_checks
-from .quote_reader import READ_MODES
+from .quote_reader import READ_MODES, SHOWN_READ_MODES
 from .settings import get_setting, update_settings
-from .widgets import ask_api_key
 
 LABEL_WIDTH = 22
 OK_COLOR = "#15803d"  # 초록
@@ -69,20 +68,12 @@ class SettingsView(ttk.Frame):
 
         ttk.Label(frm, text="기본 읽기 방식", width=LABEL_WIDTH).grid(row=0, column=0, sticky="w", pady=3)
         self.mode_var = tk.StringVar()
-        mode = ttk.Combobox(frm, textvariable=self.mode_var, values=list(READ_MODES), width=20, state="readonly")
+        mode = ttk.Combobox(frm, textvariable=self.mode_var, values=SHOWN_READ_MODES, width=20, state="readonly")
         mode.grid(row=0, column=1, sticky="w", pady=3)
         mode.bind("<<ComboboxSelected>>", lambda _e: update_settings(read_mode=READ_MODES[self.mode_var.get()]))
-        ttk.Label(frm, text="로컬: 무료, 외부 전송 없음 / Claude Code: 각자 Claude 구독(Team) 사용 / "
-                            "Claude API: API 키 필요, 장당 100원 안팎", foreground="gray").grid(
-            row=1, column=1, columnspan=3, sticky="w")
-
-        ttk.Label(frm, text="Claude API 키", width=LABEL_WIDTH).grid(row=2, column=0, sticky="w", pady=(8, 3))
-        self.key_lbl = ttk.Label(frm)
-        self.key_lbl.grid(row=2, column=1, sticky="w", pady=(8, 3))
-        keys = ttk.Frame(frm)
-        keys.grid(row=2, column=2, sticky="w", pady=(8, 3))
-        ttk.Button(keys, text="입력…", command=self._set_key).pack(side="left")
-        ttk.Button(keys, text="삭제", command=self._delete_key).pack(side="left", padx=(4, 0))
+        ttk.Label(frm, text="로컬: 무료, 외부 전송 없음 / Claude Code: 각자 Claude 구독(Team) 사용",
+                  foreground="gray").grid(row=1, column=1, columnspan=3, sticky="w")
+        # Claude API 키 칸은 숨김 (settings.json 의 anthropic_api_key 로 직접 넣을 수 있음)
 
         ttk.Label(frm, text="Claude Code", width=LABEL_WIDTH).grid(row=3, column=0, sticky="w", pady=3)
         self.cc_lbl = ttk.Label(frm, text="확인 중…")
@@ -93,19 +84,6 @@ class SettingsView(ttk.Frame):
         ttk.Button(cc, text="로그인", command=lambda: self._run_step("start_claude_code_login")).pack(
             side="left", padx=(4, 0))
         frm.columnconfigure(1, weight=1)
-
-    def _refresh_key(self):
-        key = get_setting("anthropic_api_key")
-        self.key_lbl.config(text=f"저장됨 (…{key[-4:]})" if key else "없음 (Claude API 방식을 쓸 때만 필요)")
-
-    def _set_key(self):
-        ask_api_key(self)
-        self._refresh_key()
-
-    def _delete_key(self):
-        if get_setting("anthropic_api_key") and messagebox.askyesno("Claude API 키", "저장된 키를 지울까요?", parent=self):
-            update_settings(anthropic_api_key="")
-            self._refresh_key()
 
     def _run_step(self, starter):
         """Claude Code 설치·로그인 창을 띄우고, 창이 닫히면 환경을 다시 점검"""
@@ -173,5 +151,4 @@ class SettingsView(ttk.Frame):
         for key, var in self.path_vars.items():
             var.set(get_setting(key))
         self.mode_var.set({v: k for k, v in READ_MODES.items()}.get(get_setting("read_mode"), "로컬 (무료)"))
-        self._refresh_key()
         self.check_env()
