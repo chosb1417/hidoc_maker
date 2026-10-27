@@ -13,12 +13,45 @@ from pathlib import Path
 
 from .money import VAT_MODES, split_amount
 from .settings import DEFAULT_SAVE_DIR, load_settings, update_settings
-from .storage import (ATTACH_TYPES, DEFAULT_ATTACH, attach_line, copy_attachments, copy_name, safe_filename,
+from .storage import (ATTACH_TYPES, attach_line, copy_attachments, copy_name, safe_filename,
                       unique_path)
 
 # 견적서 읽기 방식: 화면 표시 -> quote_reader 의 mode
-READ_MODES = {"로컬 (무료)": "local", "Claude API": "claude"}
+READ_MODES = {"로컬 (무료)": "local", "Claude Code (구독)": "claude_code", "Claude API": "claude"}
 QUOTE_FILETYPES = [("견적서", "*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff"), ("모든 파일", "*.*")]
+
+
+def add_placeholder(widget, text, var=None):
+    """입력칸이 비어 있을 때만 안쪽에 회색 예시 글자를 보여 줌. 입력값에는 들어가지 않음.
+    한 줄 입력칸은 Tk 9 의 placeholder 옵션을 쓰고, 그 옵션이 없는 경우(Tk 8.6, 여러 줄 Text)는
+    입력칸 위에 회색 글자를 겹쳐 놓음. Entry 는 var, Text 는 내용으로 비었는지 판단"""
+    is_text = isinstance(widget, tk.Text)
+    if not is_text:
+        try:
+            widget.configure(placeholder=text)
+            return
+        except tk.TclError:  # Tk 8.6
+            pass
+    hint = tk.Label(widget, text=text, fg="gray", bg=widget.cget("background") if is_text else "SystemWindow",
+                    font=("맑은 고딕", 10), justify="left", padx=0, pady=0, cursor="xterm")
+    hint.bind("<Button-1>", lambda _e: widget.focus_set())  # 예시 글자를 눌러도 입력칸으로
+
+    def refresh(*_):
+        if widget.get("1.0", "end-1c") if is_text else var.get():
+            hint.place_forget()
+        elif is_text:
+            hint.place(x=3, y=3)
+        else:
+            hint.place(x=4, rely=0.5, anchor="w")
+
+    if is_text:
+        def on_modified(_e):
+            refresh()
+            widget.edit_modified(False)  # 다음 변경도 알림을 받도록
+        widget.bind("<<Modified>>", on_modified, add="+")
+    else:
+        var.trace_add("write", refresh)
+    refresh()
 
 
 # ---------------------------------------------------------------- GUI
@@ -62,8 +95,10 @@ class App(tk.Tk):
         ]
         for i, (label, var, hint) in enumerate(rows):
             ttk.Label(frm, text=label, width=9).grid(row=i, column=0, sticky="w", pady=2)
-            ttk.Entry(frm, textvariable=var).grid(row=i, column=1, sticky="ew", pady=2)
-            ttk.Label(frm, text=hint, foreground="gray").grid(row=i, column=2, sticky="w", padx=8)
+            entry = ttk.Entry(frm, textvariable=var)
+            entry.grid(row=i, column=1, columnspan=2, sticky="ew", pady=2)
+            if hint:
+                add_placeholder(entry, hint, var)
         frm.columnconfigure(1, weight=1)
 
         row = len(rows)
@@ -74,7 +109,7 @@ class App(tk.Tk):
         self.quote_btn.pack(side="left")
         ttk.Label(quote, text="읽기 방식").pack(side="left", padx=(12, 4))
         mode = ttk.Combobox(quote, textvariable=self.read_mode_var, values=list(READ_MODES),
-                            width=12, state="readonly")
+                            width=17, state="readonly")
         mode.pack(side="left")
         mode.bind("<<ComboboxSelected>>",
                   lambda _e: update_settings(read_mode=READ_MODES[self.read_mode_var.get()]))
@@ -140,7 +175,7 @@ class App(tk.Tk):
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         self.detail_txt = tk.Text(left, height=5, width=20, font=("맑은 고딕", 10))
         self.detail_txt.pack(fill="both", expand=True)
-        self.detail_txt.insert("1.0", "발주 시 선금 50% 지급\n출고 시 잔금 50% 지급\n지급방식 내용은 견적서에 기재")
+        add_placeholder(self.detail_txt, "예) 발주 시 선금 50% 지급\n     출고 시 잔금 50% 지급\n     지급방식 내용은 견적서에 기재")
 
         right = ttk.LabelFrame(frm, text=" 붙임 (마지막 줄에 '끝.' 자동) ", padding=6)
         right.grid(row=0, column=1, sticky="nsew")
@@ -196,8 +231,7 @@ class App(tk.Tk):
         self.attach_tree.pack(fill="both", expand=True, pady=(6, 0))
         self.attach_tree.bind("<<TreeviewSelect>>", self._on_attach_select)
         self.attach_tree.bind("<Double-1>", self.choose_attach_file)
-        self.attaches: dict[str, dict] = {}  # tree iid -> {kind, name, count, src}
-        self._load_default_attach()
+        self.attaches: dict[str, dict] = {}  # tree iid -> {kind, name, count, src}. 처음에는 비어 있음
         self.vendor_var.trace_add("write", lambda *_: self._refresh_attach())
 
     def _attach_name(self, a):
@@ -272,11 +306,10 @@ class App(tk.Tk):
             self.attach_tree.selection_remove(sel)
             self._clear_attach_entry()
 
-    def _load_default_attach(self):
+    def _reset_attach(self):
+        """붙임 목록을 비우고 입력칸을 처음 상태로"""
         self.attach_tree.delete(*self.attach_tree.get_children())
         self.attaches.clear()
-        for kind in DEFAULT_ATTACH:
-            self._insert_attach({"kind": kind, "name": "", "count": 1, "src": ""})
         self.attach_kind.set(ATTACH_TYPES[0])
         self._clear_attach_entry()
 
@@ -392,9 +425,16 @@ class App(tk.Tk):
                 return
             api_key = load_settings().get("anthropic_api_key", "")
         path = filedialog.askopenfilename(title="견적서 선택", filetypes=QUOTE_FILETYPES, parent=self)
-        if not path:
-            return
+        if path:
+            self._start_quote(path, mode, api_key)
 
+    def _busy(self, text):
+        """견적서 읽기·로그인 대기 중 표시. text 가 비면 원래대로"""
+        self.quote_btn.state(["disabled"] if text else ["!disabled"])
+        self.quote_status.config(text=text)
+        self.config(cursor="watch" if text else "")
+
+    def _start_quote(self, path, mode, api_key):
         # 읽는 동안 창이 멈추지 않도록 따로 실행하고 끝날 때까지 확인
         result = {}
 
@@ -405,23 +445,31 @@ class App(tk.Tk):
             except Exception as e:  # QuoteReadError 는 안내문, 그 밖은 예상 못 한 오류
                 result["error"] = e
 
-        self.quote_btn.state(["disabled"])
-        self.quote_status.config(text="읽는 중…")
-        self.config(cursor="watch")
+        self._busy("읽는 중…")
         thread = threading.Thread(target=work, daemon=True)
         thread.start()
-        self._wait_quote(thread, path, result)
+        self._wait_quote(thread, (path, mode, api_key), result)
 
-    def _wait_quote(self, thread, path, result):
+    def _wait_quote(self, thread, job, result):
         if thread.is_alive():
-            self.after(200, self._wait_quote, thread, path, result)
+            self.after(200, self._wait_quote, thread, job, result)
             return
-        self.quote_btn.state(["!disabled"])
-        self.quote_status.config(text="")
-        self.config(cursor="")
+        self._busy("")
         if "error" in result:
             e = result["error"]
-            if type(e).__name__ == "QuoteReadError":
+            if type(e).__name__ == "ClaudeCodeNotInstalled":
+                self._offer_step(job, "Claude Code 설치", f"{e}\n\n지금 설치할까요? (관리자 권한 필요 없음, 1~2분)\n"
+                                 "Claude Pro·Max 같은 유료 구독이 있어야 쓸 수 있습니다. 무료 플랜은 안 됩니다.\n"
+                                 "설치 창이 끝나면 Enter 키를 누르세요. 이어서 로그인 단계로 넘어갑니다.",
+                                 "start_claude_code_install", "설치 기다리는 중…")
+                return
+            if type(e).__name__ == "ClaudeCodeLoginRequired":
+                self._offer_step(job, "Claude Code 로그인", f"{e}\n\n지금 로그인 창을 열까요?\n"
+                                 "브라우저에서 Claude 계정으로 로그인한 뒤, 검은 창에서 아무 키나 누르면\n"
+                                 "견적서를 자동으로 다시 읽습니다.",
+                                 "start_claude_code_login", "로그인 기다리는 중…")
+                return
+            if any(c.__name__ == "QuoteReadError" for c in type(e).__mro__):
                 msg = str(e)
             elif isinstance(e, ImportError):
                 msg = f"견적서 읽기에 필요한 패키지가 없습니다. 실행.bat으로 다시 실행해 주세요.\n{e}"
@@ -429,12 +477,33 @@ class App(tk.Tk):
                 msg = f"견적서를 읽지 못했습니다.\n{type(e).__name__}: {e}"
             messagebox.showerror("견적서 읽기 실패", msg, parent=self)
             return
-        self._apply_quote(path, result["data"])
+        self._apply_quote(job[0], result["data"])
+
+    def _offer_step(self, job, title, question, starter, busy_text):
+        """Claude Code 설치·로그인 창을 띄우고, 창이 닫히면 같은 견적서를 다시 읽음.
+        다시 읽을 때 아직 준비가 안 됐으면(설치 실패, 로그인 안 함) 다시 물어봄"""
+        if not messagebox.askyesno(title, question, parent=self):
+            return
+        try:
+            from . import quote_reader
+            proc = getattr(quote_reader, starter)()
+        except Exception as e:
+            messagebox.showerror(title, f"창을 열지 못했습니다.\n{e}", parent=self)
+            return
+        self._busy(busy_text)
+        self._wait_step(proc, job)
+
+    def _wait_step(self, proc, job):
+        if proc.poll() is None:
+            self.after(500, self._wait_step, proc, job)
+            return
+        self._busy("")
+        self._start_quote(*job)
 
     def _apply_quote(self, path, data):
         items = data["items"]
         if not items:
-            hint = "Claude API 방식으로 다시 읽거나 " if READ_MODES[self.read_mode_var.get()] == "local" else ""
+            hint = "Claude 방식으로 다시 읽거나 " if READ_MODES[self.read_mode_var.get()] == "local" else ""
             messagebox.showwarning("견적서 읽기", f"견적서에서 품목을 찾지 못했습니다.\n{hint}직접 입력해 주세요.\n\n"
                                    + "\n".join(data["warnings"]), parent=self)
             return
@@ -588,5 +657,6 @@ class App(tk.Tk):
         self.items.clear()
         self._clear_item_entry()
         self._refresh()
-        self._load_default_attach()
+        self.detail_txt.delete("1.0", "end")
+        self._reset_attach()
 

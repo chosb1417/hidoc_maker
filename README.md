@@ -11,10 +11,11 @@
 
 | 항목 | 설치 |
 |---|---|
-| Python 3 (3.14에서 확인) | 없으면 `실행.bat`이 winget으로 자동 설치 |
+| Python 3.14 이상 (Tk 9 포함) | `실행.bat`이 PATH의 `python` → `py -3` → 기본 설치 위치 순서로 Tk 9 이상인 Python을 찾아 씀(`hidoc/check_python.py`). 없으면 winget으로 Python 3.14 설치. Tk 9가 없으면 입력칸 예시 글자를 직접 그리는 방식으로 대신함 |
 | 파이썬 패키지 (`pywin32`, 견적서 읽기용 `pdfplumber`·`winrt`·`anthropic` 등) | 없으면 `실행.bat`이 `requirements.txt`로 자동 설치 |
 | 한컴오피스 한글 (2024에서 확인) | 직접 설치. 없으면 안내만 하고 실행되며, 하이웍스 복사만 쓸 수 있음 |
 | Windows 한국어 OCR | 한국어 Windows에는 기본으로 있음. 스캔본 견적서를 로컬 방식으로 읽을 때 필요 |
+| Claude Code + Claude 구독 로그인 | Claude Code 방식으로 견적서를 읽을 때만 필요. 없으면 입력창이 공식 설치(`irm https://claude.ai/install.ps1 \| iex`, 관리자 권한 불필요)와 로그인을 차례로 안내함. PATH의 `claude`, `%USERPROFILE%\.local\bin\claude.exe`, VS Code 확장 순서로 찾음. Pro·Max 이상 유료 구독 필요 |
 | Claude API 키 | Claude API 방식으로 견적서를 읽을 때만 필요. 입력창의 `API 키…`로 넣음 |
 
 ## 파일 구성
@@ -26,6 +27,7 @@ hidoc_maker/
 ├─ requirements.txt    필요한 파이썬 패키지 목록
 ├─ hidoc/              프로그램 코드
 │  ├─ __main__.py      python -m hidoc 으로 실행할 때 시작점
+│  ├─ check_python.py  실행.bat이 쓸 Python이 Tk 9 이상인지 확인
 │  ├─ app.py           입력창(tkinter)
 │  ├─ money.py         공급가액·세액 계산, 한글 금액, 을/를
 │  ├─ storage.py       저장 폴더 구조, 파일 이름, 붙임 파일 복사
@@ -65,9 +67,13 @@ hidoc_maker/
 | 읽기 방식 | 방법 | 비용·조건 |
 |---|---|---|
 | 로컬 (무료, 기본값) | 글자가 들어 있는 PDF는 글자를 그대로 읽고, 스캔본·이미지는 Windows 내장 OCR로 읽은 뒤 "수량 × 단가 = 금액"이 맞는 줄을 품목으로 찾음 | 무료, 인터넷 불필요, 외부 전송 없음. 양식이 특이하거나 스캔이 흐리면 틀리거나 빠질 수 있음 |
-| Claude API | Claude(`claude-opus-5-5`)가 문서를 직접 읽음. 구매대상 이름도 제안함 | API 키와 인터넷 필요. 견적서 1장에 수십 원 정도. 견적서 내용이 Anthropic 서버로 전송됨 |
+| Claude Code (구독) | 이 PC에 로그인된 Claude Code(`claude -p`)가 문서를 읽음. 파일 읽기 도구만 허용. 구매대상 이름도 제안함. 10초 안팎 | 각자 자기 Claude 구독(Pro/Max)으로 로그인해야 함. 구독 사용 한도에서 차감. API 키로 로그인돼 있으면 요금이 나가지 않도록 막음. 견적서 내용이 Anthropic 서버로 전송됨 |
+| Claude API | Claude(`claude-opus-5-5`)가 문서를 직접 읽음. 구매대상 이름도 제안함 | API 키와 인터넷 필요. 견적서 1장에 100원 안팎(어림값). 견적서 내용이 Anthropic 서버로 전송됨 |
 
 - 읽기 방식은 마지막에 고른 것을 기억합니다.
+- Claude Code 방식에서 Claude Code가 설치되어 있지 않으면 "지금 설치할까요?"라고 묻습니다. `예`를 누르면 파란 PowerShell 창에서 Anthropic 공식 설치가 진행되고(1~2분, 진행 표시 없음), 끝나고 Enter를 누르면 로그인 단계로 넘어갑니다.
+- Claude Code 방식에서 로그인이 안 되어 있으면 "지금 로그인 창을 열까요?"라고 묻습니다. `예`를 누르면 검은 창과 브라우저가 열리고, 브라우저에서 Claude 계정으로 로그인한 뒤 검은 창에서 아무 키나 누르면 견적서를 자동으로 다시 읽습니다.
+- 회사는 Claude Team 요금제(조직 `Gailab Co`)를 씁니다. Claude Code 방식은 각자 자기 Team 계정으로 로그인해서 쓰세요. 한 사람의 로그인을 다른 PC에 복사해 쓰지 마세요. Team 계정이 아닌 사람은 로컬이나 Claude API 방식을 쓰면 됩니다.
 - 부가세는 세액 칸이 있으면 `별도`로, "공급가액 + 세액 = 수량 × 단가"이면 `포함`으로 봅니다. 둘 다 아니면 문서의 "부가세 포함/별도" 문구를 따르고, 문구도 없으면 `별도`로 넣은 뒤 알려 줍니다.
 - 견적서의 합계와 읽은 품목의 합계가 다르면 알려 줍니다. OCR로 읽은 경우는 숫자를 꼭 확인하세요.
 
@@ -149,7 +155,6 @@ hidoc_maker/
 | 바꿀 것 | 위치 |
 |---|---|
 | 붙임 드롭다운 목록 | `hidoc/storage.py`의 `ATTACH_TYPES` |
-| 처음 열 때 들어가는 붙임 | `hidoc/storage.py`의 `DEFAULT_ATTACH` |
 | 기업 폴더에 둘 공통 서류 | `hidoc/storage.py`의 `COMPANY_DOCS` |
 | 붙임 표기 형식 (`[종류]이름 1부.`) | `hidoc/storage.py`의 `attach_line` |
 | 부가세율 | `hidoc/money.py`의 `VAT_RATE` |
@@ -164,6 +169,34 @@ hidoc_maker/
 - 한글은 화면에 뜨지 않고 뒤에서 실행됐다가 생성이 끝나면 닫힙니다.
 - 품목이 많아 한 쪽을 넘는 경우는 아직 시험하지 않았습니다.
 - 붙임 목록에 보이는 "복사될 이름"에는 `(2)` 같은 번호가 빠져 있습니다. 실제로 저장된 이름은 생성이 끝난 뒤 뜨는 창에 나옵니다.
+
+## exe로 만들 때 (PyInstaller 기준, 아직 만들지 않음)
+
+나중에 Python 없이 실행되는 exe로 묶을 때 확인할 내용입니다. 1·2번은 빌드 전에 코드를 고쳐야 합니다.
+
+### 빌드 전에 코드를 고쳐야 하는 것
+
+1. **설정·저장 폴더 위치**: `hidoc/settings.py`의 `ROOT_DIR`은 "코드 파일이 있는 폴더의 위"를 기준으로 `settings.json`과 `output/`을 찾습니다. 한 파일 exe는 실행할 때마다 코드를 임시 폴더(`sys._MEIPASS`)에 풀었다가 지우므로, 그대로 두면 저장 경로·읽기 방식·Claude API 키 설정이 매번 사라지고 기본 저장 폴더도 임시 폴더가 됩니다. exe로 실행 중일 때(`sys.frozen`)는 exe가 있는 폴더(`Path(sys.executable).parent`)나 사용자 폴더(`%APPDATA%`)를 쓰도록 바꿔야 합니다. `hidoc/html_doc.py`의 `PREVIEW_PATH`(하이웍스 미리보기)도 `DEFAULT_SAVE_DIR`을 쓰므로 같이 해결됩니다.
+2. **한글 자동화 캐시**: `hidoc/hwp_doc.py`의 `win32.gencache.EnsureDispatch("HWPFrame.HwpObject")`는 pywin32가 캐시 파일(`gen_py`)을 만들어 쓰는 방식인데, exe 안에서는 캐시를 만들지 못해 오류가 나는 경우가 많습니다. 캐시를 쓰지 않는 `win32com.client.Dispatch`로 바꾸거나 캐시 위치를 쓰기 가능한 폴더로 지정해야 합니다(바꾼 뒤 한글 생성 전체를 다시 시험).
+
+### 빌드할 때 챙길 것
+
+3. **Python 3.14 이상(Tk 9)으로 빌드**: exe에는 빌드한 Python과 Tk가 그대로 들어갑니다. Tk 9여야 입력칸 예시 글자가 기본 `placeholder` 기능으로 나옵니다(아니면 직접 그리는 방식으로 대신함). 빌드 시점의 PyInstaller가 그 Python 버전을 지원하는지도 확인합니다.
+4. **자동으로 안 따라오는 패키지**: Windows OCR(`winrt-*` 패키지들), PDF 그림 변환(`pypdfium2`의 pdfium DLL), `pywin32`는 빌드 도구가 빠뜨리기 쉽습니다. 빠지면 프로그램은 뜨는데 일부 기능(예: 스캔본 견적서 읽기)만 고장 납니다. 필요하면 hidden import·collect 옵션으로 넣고, 빌드 후 아래 점검표로 모든 기능을 눌러 봅니다.
+   - 입력창 열기, 예시 글자 표시
+   - 한글 생성(붙임 복사 포함), 하이웍스용 복사
+   - 견적서 불러오기: 로컬(글자 PDF, 스캔 PDF, 이미지), Claude Code(구독), Claude API
+   - 설정 유지(저장 경로·읽기 방식을 바꾸고 껐다 켜기)
+5. **한 파일 exe와 폴더 묶음**: 한 파일(`--onefile`)은 실행할 때마다 압축을 풀어서 느리고(수 초), 백신이 악성으로 잘못 판단하는 경우가 더 많습니다. 폴더 묶음(`--onedir`)은 빠르고 안정적이지만 파일이 여러 개입니다. 사내 배포는 폴더 묶음을 zip으로 전달하는 쪽을 권장합니다.
+6. **크기**: PDF·OCR·이미지·Claude 패키지 때문에 100~200MB 정도로 예상합니다(어림값, 빌드 후 확인).
+7. **오류 기록**: exe는 검은 창 없이(`--windowed`) 실행되므로 예상 못 한 오류가 나도 흔적이 남지 않습니다. 오류를 파일(예: exe 옆 `log.txt`)로 남기는 기능을 넣어 두면 동료 PC 문제를 해결하기 쉽습니다.
+
+### 배포·운영
+
+8. **Windows 경고**: 서명하지 않은 exe는 처음 실행할 때 "Windows의 PC 보호" 경고가 뜹니다(`추가 정보` → `실행`). 경고를 없애려면 코드 서명 인증서가 필요합니다(유료).
+9. **업데이트**: 코드를 고칠 때마다 다시 빌드해서 다시 나눠 줘야 합니다. 창 제목에 버전 번호를 표시해 두면 누가 예전 버전을 쓰는지 알 수 있습니다.
+10. **exe에 넣을 수 없는 것**: 한컴오피스 한글, Windows 한국어 OCR, Claude Code(구독 방식)는 지금처럼 각 PC에 있어야 합니다. exe를 쓰면 `실행.bat`과 `hidoc/check_python.py`의 Python 확인·패키지 설치는 필요 없어지지만, 한글 설치 여부 안내는 프로그램 안으로 옮겨야 합니다.
+11. **깨끗한 PC에서 시험**: Python이 없는 PC에서 한 번 실행해 봐야 빠진 파일이 드러납니다.
 
 ## 작업 기록
 
@@ -189,9 +222,16 @@ hidoc_maker/
 20. (2026-10-27) 견적서 불러오기 추가(`quote_reader.py`). 로컬 방식(PDF 글자 + Windows OCR, 기본값)과 Claude API 방식 중 선택. 읽는 동안 창이 멈추지 않음. `settings.json`은 API 키가 들어가므로 git에서 제외, 시험용 `samples/` 폴더도 제외
 21. (2026-10-27) 실시간 확인용: 하이웍스용 복사 때 `output/preview.html` 저장(Live Server로 보기), `.py` 저장 시 입력창을 자동 재시작하는 `dev_run.py` 추가
 22. (2026-10-27) 폴더 구조 정리: 코드를 `hidoc/` 폴더로 옮기고 `python -m hidoc`으로 실행. 입력창 파일에 섞여 있던 금액 계산(`money.py`), 설정(`settings.py`), 저장·붙임 복사(`storage.py`)를 분리해 다른 모듈이 입력창 코드를 불러오지 않게 함. `purchase_request.py` → `hidoc/app.py`, `문의사항.md` → `docs/`. 금액 계산·견적서 규칙 시험(`tests/`, 16개) 추가
+23. (2026-10-28) 견적서 읽기 방식에 Claude Code (구독) 추가: `claude -p`를 파일 읽기 도구만 허용해 실행, 구독 로그인일 때만 동작(API 키 환경변수는 빼고 실행). 로그인이 안 되어 있으면 로그인 창(`claude auth login --claudeai`)을 띄우고 끝나면 자동으로 다시 읽음. Claude API 비용 표기를 "100원 안팎"으로 수정
+24. (2026-10-28) Claude Code가 없는 PC에서 Claude Code 방식을 고르면 공식 설치 → 로그인 → 견적서 다시 읽기로 이어지도록 함 (회사가 Claude Team 요금제 사용)
+25. (2026-10-28) 입력칸 설명(구매대상·제목·견적처)을 칸 밖에서 칸 안 회색 예시 글자로 옮김(비어 있을 때만 보이고 값에는 안 들어감). 한 줄 칸은 Tk 9의 `placeholder` 옵션을 쓰고, Tk 8.6이나 여러 줄 칸은 회색 글자를 겹쳐 표시. 지급방식 상세의 기본 문장도 예시로 바꿈(입력하지 않으면 품의서에 상세가 들어가지 않음). 붙임 목록은 처음과 `새로 작성` 후 비어 있게 함(`DEFAULT_ATTACH` 삭제). `새로 작성`이 지급방식 상세도 지움
+26. (2026-10-28) `실행.bat`이 Tk 9 이상(Python 3.14 이상)인 Python을 골라 실행하도록 변경. 예전 Python이 PATH에 먼저 있어도 맞는 Python을 찾고, 없으면 Python 3.14 설치
+27. (2026-10-28) README에 "exe로 만들 때" 절 추가: 빌드 전 코드 수정 2가지(설정 폴더 위치, 한글 자동화 캐시), 빌드 시 확인 5가지, 배포·운영 4가지
 
 ## 다음 할 일
 
 - 실제 견적서 샘플(`samples/`)로 로컬 방식 규칙 다듬기, Claude API 방식 실제 호출 시험 (지금은 직접 만든 시험용 견적서로만 확인)
 - 담당자 답변을 받으면 `docs/문의사항.md` 기준으로 반영 (부가세 끝자리·계산 방식, 총계 단가 칸, 할인·단위, 날짜)
 - 미정: 4번 항목을 구매처(URL)/지급방식 중 고르기, 붙임 표기 형식, "주식회사 지아이랩" 바닥글
+- VS Code 탐색기 정리: `.vscode/settings.json`에 파일 묶기(File Nesting) 설정. 최상위 파일이 늘어나면 `README.md` 아래에 `requirements.txt`·`.gitignore` 등, `실행.bat` 아래에 `dev_run.py`를 접어 보이게 함
+- exe 만들기: 위 [exe로 만들 때](#exe로-만들-때-pyinstaller-기준-아직-만들지-않음) 절 참고. 빌드 전에 1번(설정 폴더 위치)과 2번(한글 자동화 캐시)부터 고치기

@@ -3,14 +3,19 @@
 read_quote(path, mode, api_key) 로 호출.
 - "local": PDF 글자 읽기(pdfplumber), 글자가 없으면 Windows OCR(한국어) + 규칙으로 품목 찾기. 무료
 - "claude": Claude API 가 문서를 직접 읽음. 인터넷과 API 키 필요, 견적서 내용이 Anthropic 으로 전송됨
+- "claude_code": 이 PC에 로그인된 Claude Code(claude -p)가 읽음. 본인 Claude 구독 사용량에서 차감
 결과: {"vendor": str, "target": str, "items": [{name, qty, price, vat, note}], "warnings": [str]}
 """
 
 import base64
+import glob
 import io
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from .money import split_amount
@@ -60,10 +65,27 @@ CLAUDE_SCHEMA = {
     "required": ["vendor", "target", "items", "warnings"],
     "additionalProperties": False,
 }
+# Claude Code 의 Read 도구가 그대로 읽는 형식. 나머지(bmp, tif)는 png 로 바꿔서 넘김
+CLAUDE_CODE_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+CLAUDE_CODE_TIMEOUT = 300  # 초
+# PATH 에 claude 가 없을 때 찾아볼 곳: 공식 설치 위치(방금 설치해 PATH 가 아직 안 바뀐 경우), VS Code 확장
+CLAUDE_CODE_NATIVE = Path.home() / ".local" / "bin" / "claude.exe"
+CLAUDE_CODE_GLOB = str(Path.home() / ".vscode" / "extensions" / "anthropic.claude-code-*" / "resources"
+                       / "native-binary" / "claude.exe")
+# Anthropic 공식 설치 명령 (code.claude.com/docs/en/setup). 관리자 권한 불필요
+CLAUDE_CODE_INSTALL = "irm https://claude.ai/install.ps1 | iex"
 
 
 class QuoteReadError(Exception):
     """사용자에게 그대로 보여줄 오류"""
+
+
+class ClaudeCodeNotInstalled(QuoteReadError):
+    """Claude Code 가 없음. 입력창이 설치할지 물어봄"""
+
+
+class ClaudeCodeLoginRequired(QuoteReadError):
+    """Claude Code 가 로그인되어 있지 않음. 입력창이 로그인 창을 띄울지 물어봄"""
 
 
 def read_quote(path, mode="local", api_key=""):
@@ -75,6 +97,8 @@ def read_quote(path, mode="local", api_key=""):
         raise QuoteReadError("PDF 또는 이미지(png, jpg 등) 파일만 읽을 수 있습니다.")
     if mode == "claude":
         return _read_claude(path, api_key)
+    if mode == "claude_code":
+        return _read_claude_code(path)
     return _read_local(path)
 
 
@@ -334,8 +358,102 @@ def _read_claude(path: Path, api_key: str):
         data = json.loads(text)
     except ValueError:
         raise QuoteReadError("Claude API 응답을 해석하지 못했습니다. 다시 시도하세요.")
+    return _from_claude(data)
 
+
+def _from_claude(data):
+    """CLAUDE_SCHEMA 형식 결과를 입력창용으로 정리"""
     items = [{"name": it["name"].strip(), "qty": max(1, int(it["qty"])), "price": max(0, int(it["price"])),
               "vat": it["vat"], "note": it["note"].strip()} for it in data["items"]]
     return {"vendor": _company(data["vendor"]), "target": data["target"].strip(),
             "items": items, "warnings": data["warnings"]}
+
+
+# ---------------------------------------------------------------- Claude Code (구독)
+def find_claude_code():
+    """claude 실행 파일 경로. PATH 에 없으면 VS Code 확장 안에서 가장 최근 것. 없으면 None"""
+    found = shutil.which("claude")
+    if found:
+        return found
+    if CLAUDE_CODE_NATIVE.is_file():
+        return str(CLAUDE_CODE_NATIVE)
+    candidates = glob.glob(CLAUDE_CODE_GLOB)
+    return max(candidates, key=os.path.getmtime) if candidates else None
+
+
+def _run_claude_code(args, cwd=None, timeout=CLAUDE_CODE_TIMEOUT):
+    # API 키 환경변수가 있으면 구독 대신 API 요금으로 결제되므로 빼고 실행
+    env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+    return subprocess.run(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))  # 검은 창이 뜨지 않게
+
+
+def start_claude_code_install():
+    """공식 설치 명령을 새 PowerShell 창에서 실행. 창이 닫히면 끝나는 Popen 을 돌려줌"""
+    script = ("Write-Host 'Claude Code를 설치합니다. 1~2분 걸리고, 그동안 화면에 진행 표시가 없습니다...'; "
+              f"{CLAUDE_CODE_INSTALL}; "
+              "Write-Host ''; Read-Host '끝났습니다. Enter 키를 누르면 창이 닫히고 다음 단계로 넘어갑니다'")
+    return subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+                            creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+
+def start_claude_code_login():
+    """Claude 구독 로그인 창(콘솔 + 브라우저)을 띄움. 창이 닫히면 끝나는 Popen 을 돌려줌"""
+    exe = find_claude_code()
+    if not exe:
+        raise QuoteReadError("Claude Code를 찾을 수 없습니다.")
+    env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+    # 로그인 결과를 볼 수 있도록 끝난 뒤 키를 누를 때까지 창을 남겨 둠
+    # /s: 바깥 따옴표만 벗겨서 경로에 공백이 있어도 그대로 전달
+    return subprocess.Popen(f'cmd /s /c ""{exe}" auth login --claudeai & pause"', env=env,
+                            creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+
+def _read_claude_code(path: Path):
+    exe = find_claude_code()
+    if not exe:
+        raise ClaudeCodeNotInstalled("이 PC에 Claude Code가 설치되어 있지 않습니다.\n"
+                                     "설치 없이 쓰려면 읽기 방식을 '로컬 (무료)'로 바꾸세요.")
+    # 구독 로그인인지 확인 (API 키로 로그인돼 있으면 API 요금이 나가므로 막음)
+    try:
+        status = json.loads(_run_claude_code([exe, "auth", "status"], timeout=30).stdout or "{}")
+    except (ValueError, subprocess.TimeoutExpired):
+        status = {}
+    if not status.get("loggedIn"):
+        raise ClaudeCodeLoginRequired("Claude Code에 로그인되어 있지 않습니다.\n"
+                                      "로그인하지 않고 쓰려면 읽기 방식을 '로컬 (무료)'로 바꾸세요.")
+    if status.get("authMethod") != "claude.ai":
+        raise QuoteReadError("Claude Code가 Claude 구독이 아닌 방식(API 키 등)으로 로그인되어 있습니다.\n"
+                             "API 요금이 나가지 않도록 이 방식은 구독 로그인에서만 씁니다.")
+
+    with tempfile.TemporaryDirectory(prefix="hidoc_") as tmp:
+        if path.suffix.lower() not in CLAUDE_CODE_EXTS:
+            from PIL import Image
+            converted = Path(tmp) / "quote.png"
+            with Image.open(path) as img:
+                img.save(converted)
+            path = converted
+        prompt = f"Read 도구로 이 견적서 파일을 읽으세요: {path}\n\n{CLAUDE_PROMPT}"
+        args = [exe, "-p", prompt,
+                "--output-format", "json",
+                "--json-schema", json.dumps(CLAUDE_SCHEMA, ensure_ascii=False),
+                "--tools", "Read", "--allowedTools", "Read",  # 파일 읽기만 허용
+                "--permission-mode", "dontAsk",
+                "--no-session-persistence", "--strict-mcp-config",
+                "--max-turns", "5", "--effort", "medium"]
+        try:
+            result = _run_claude_code(args, cwd=path.parent)
+        except subprocess.TimeoutExpired:
+            raise QuoteReadError(f"Claude Code가 {CLAUDE_CODE_TIMEOUT // 60}분 안에 끝나지 않았습니다. 다시 시도하세요.")
+
+    try:
+        out = json.loads(result.stdout)
+    except ValueError:
+        raise QuoteReadError(f"Claude Code 실행에 실패했습니다.\n{(result.stderr or result.stdout)[-500:]}")
+    if out.get("is_error") or not out.get("structured_output"):
+        msg = out.get("result") or out.get("subtype") or "알 수 없는 오류"
+        if "limit" in str(msg).lower():
+            msg = f"Claude 구독 사용 한도에 도달했습니다. 잠시 뒤에 다시 시도하세요.\n{msg}"
+        raise QuoteReadError(f"Claude Code가 견적서를 읽지 못했습니다.\n{str(msg)[:500]}")
+    return _from_claude(out["structured_output"])
