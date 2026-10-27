@@ -19,7 +19,7 @@ class MainWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1000x880")  # 품의서 화면 위 "처음으로" 줄만큼 높임
+        self.geometry("1000x910")  # 품의서 화면(처음으로 줄 + 구매처 칸까지)이 다 보이는 높이
         self.minsize(920, 680)
         style = ttk.Style(self)
         style.configure(".", font=("맑은 고딕", 10))

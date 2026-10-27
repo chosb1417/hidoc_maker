@@ -21,6 +21,12 @@ class PaymentLinesTest(unittest.TestCase):
     def test_details_only_keeps_heading(self):
         self.assertEqual(payment_lines("", ["계약 시 전액"]), ["4. 지급방식", "- 계약 시 전액"])
 
+    def test_shop_only_is_item_4(self):
+        self.assertEqual(payment_lines("", [], "https://cart.coupang.com/x"), ["4. 구매처 : https://cart.coupang.com/x"])
+
+    def test_shop_after_payment_is_item_5(self):
+        self.assertEqual(payment_lines("카드", [], "https://a.b"), ["4. 지급방식 : 카드", "5. 구매처 : https://a.b"])
+
 
 class HtmlPaymentTest(unittest.TestCase):
     def test_html_without_payment(self):
@@ -31,6 +37,11 @@ class HtmlPaymentTest(unittest.TestCase):
     def test_html_with_payment(self):
         html = build_html({**DOC, "payment": "후불", "payment_detail": []}, ITEMS)
         self.assertIn("4. 지급방식 : 후불", html)
+
+    def test_html_with_shop(self):
+        html = build_html({**DOC, "payment": "", "payment_detail": [], "shop": "https://cart.coupang.com/cartView.pang?a=1&b=2"}, ITEMS)
+        self.assertIn("4. 구매처 : https://cart.coupang.com/cartView.pang?a=1&amp;b=2", html)
+        self.assertNotIn("지급방식", html)
 
 
 if __name__ == "__main__":

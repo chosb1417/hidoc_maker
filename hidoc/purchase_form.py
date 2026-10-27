@@ -32,6 +32,7 @@ class PurchaseRequestForm(ttk.Frame):
         self.title_var = tk.StringVar()
         self.vendor_var = tk.StringVar()
         self.payment_var = tk.StringVar()  # 비워 두면 품의서에서 4번 지급방식 항목을 뺌
+        self.shop_var = tk.StringVar()  # 온라인 구매(쿠팡 등) 주소. 비워 두면 구매처 항목을 뺌
         self.vat_note_var = tk.BooleanVar(value=False)  # 견적금액 뒤 'VAT포함' 표기
         self.save_dir_var = tk.StringVar()
         self.read_mode_var = tk.StringVar()
@@ -64,6 +65,7 @@ class PurchaseRequestForm(ttk.Frame):
             ("제목", self.title_var, "비워두면 '구매대상 + 구매의 건'으로 자동 작성"),
             ("견적처", self.vendor_var, "기업명 - ▼ 목록에서 기존 기업을 고르거나 새로 입력 (저장 폴더·붙임 파일 이름에 사용)"),
             ("지급방식", self.payment_var, f"예) {get_setting('payment_example')}  - 비워 두면 품의서에서 지급방식 항목을 뺌"),
+            ("구매처", self.shop_var, "온라인 구매 주소(URL) 예) 쿠팡 장바구니 주소  - 비워 두면 품의서에서 구매처 항목을 뺌"),
         ]
         for i, (label, var, hint) in enumerate(rows):
             ttk.Label(frm, text=label, width=9).grid(row=i, column=0, sticky="w", pady=2)
@@ -551,6 +553,7 @@ class PurchaseRequestForm(ttk.Frame):
             "payment": self.payment_var.get().strip(),
             "vat_note": self.vat_note_var.get(),
             "payment_detail": self._lines(self.detail_txt),
+            "shop": self.shop_var.get().strip(),
             "attach": [self._attach_values(a)[0] for a in attaches],
         }
         return doc, items, attaches
@@ -628,7 +631,7 @@ class PurchaseRequestForm(ttk.Frame):
     def reset(self):
         if not messagebox.askyesno("새로 작성", "입력한 내용을 모두 지울까요?"):
             return
-        for var in (self.target_var, self.title_var, self.vendor_var, self.payment_var):
+        for var in (self.target_var, self.title_var, self.vendor_var, self.payment_var, self.shop_var):
             var.set("")
         self.vat_note_var.set(False)
         self.tree.delete(*self.tree.get_children())

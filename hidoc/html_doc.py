@@ -99,8 +99,8 @@ def build_html(doc: dict, items: list[dict]) -> str:
                + "".join(f"<tr>{r}</tr>" for r in rows) + "</table>")
     out.append(_p())
 
-    # 4. 지급방식: 입력하지 않았으면 항목을 빼고 빈 줄만 맞춤
-    lines = payment_lines(doc["payment"], doc["payment_detail"])
+    # 4. 지급방식·구매처: 입력하지 않았으면 항목을 빼고 빈 줄만 맞춤
+    lines = payment_lines(doc["payment"], doc["payment_detail"], doc.get("shop", ""))
     out += [_p(ln, indent=True) for ln in lines]
     out += [_p(), _p()] if lines else [_p()]
 
