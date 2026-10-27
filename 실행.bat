@@ -15,8 +15,8 @@ python -c "import sys" >nul 2>nul
 if errorlevel 1 goto :python_failed
 
 :packages
-rem 2. pywin32 확인, 없으면 requirements.txt로 설치
-python -c "import win32com.client, win32clipboard" >nul 2>nul
+rem 2. 필요한 패키지 확인, 하나라도 없으면 requirements.txt로 설치
+python -c "import win32com.client, win32clipboard, pdfplumber, pypdfium2, PIL, anthropic, winrt.windows.media.ocr" >nul 2>nul
 if not errorlevel 1 goto :hwp
 
 echo 필요한 패키지를 설치합니다...

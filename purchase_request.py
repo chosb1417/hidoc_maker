@@ -12,8 +12,9 @@ import re
 import shutil
 import datetime as dt
 import filecmp
+import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
@@ -22,6 +23,9 @@ SETTINGS_PATH = APP_DIR / "settings.json"
 VAT_RATE = 0.1
 # 품목별 세액 처리: 별도 = 단가에 10% 추가 / 포함 = 단가에 부가세 포함 / 없음 = 면세
 VAT_MODES = ["별도", "포함", "없음"]
+# 견적서 읽기 방식: 화면 표시 -> quote_reader 의 mode
+READ_MODES = {"로컬 (무료)": "local", "Claude API": "claude"}
+QUOTE_FILETYPES = [("견적서", "*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff"), ("모든 파일", "*.*")]
 
 
 def split_amount(qty: int, price: int, mode: str) -> tuple[int, int]:
@@ -121,7 +125,10 @@ class App(tk.Tk):
         self.vendor_var = tk.StringVar()
         self.payment_var = tk.StringVar(value="선금 50% , 잔금 50%")
         self.vat_note_var = tk.BooleanVar(value=False)  # 견적금액 뒤 'VAT포함' 표기
-        self.save_dir_var = tk.StringVar(value=load_settings().get("save_dir", str(DEFAULT_SAVE_DIR)))
+        settings = load_settings()
+        self.save_dir_var = tk.StringVar(value=settings.get("save_dir", str(DEFAULT_SAVE_DIR)))
+        mode_label = {v: k for k, v in READ_MODES.items()}.get(settings.get("read_mode"), "로컬 (무료)")
+        self.read_mode_var = tk.StringVar(value=mode_label)
         self.item_vars = {k: tk.StringVar() for k, _, _ in self.ITEM_FIELDS}
         self.item_vars["qty"].set("1")
         self.item_vars["vat"].set("별도")
@@ -144,6 +151,24 @@ class App(tk.Tk):
             ttk.Entry(frm, textvariable=var).grid(row=i, column=1, sticky="ew", pady=2)
             ttk.Label(frm, text=hint, foreground="gray").grid(row=i, column=2, sticky="w", padx=8)
         frm.columnconfigure(1, weight=1)
+
+        row = len(rows)
+        ttk.Label(frm, text="견적서", width=9).grid(row=row, column=0, sticky="w", pady=(6, 2))
+        quote = ttk.Frame(frm)
+        quote.grid(row=row, column=1, sticky="w", pady=(6, 2))
+        self.quote_btn = ttk.Button(quote, text="견적서 불러오기…", command=self.load_quote)
+        self.quote_btn.pack(side="left")
+        ttk.Label(quote, text="읽기 방식").pack(side="left", padx=(12, 4))
+        mode = ttk.Combobox(quote, textvariable=self.read_mode_var, values=list(READ_MODES),
+                            width=12, state="readonly")
+        mode.pack(side="left")
+        mode.bind("<<ComboboxSelected>>",
+                  lambda _e: save_settings({**load_settings(), "read_mode": READ_MODES[self.read_mode_var.get()]}))
+        ttk.Button(quote, text="API 키…", command=self.set_api_key).pack(side="left", padx=(6, 0))
+        self.quote_status = ttk.Label(quote, foreground="gray")
+        self.quote_status.pack(side="left", padx=8)
+        ttk.Label(frm, text="PDF·이미지에서 견적처와 품목을 읽어 채움", foreground="gray").grid(
+            row=row, column=2, sticky="w", padx=8)
 
     def _build_items(self):
         frm = ttk.LabelFrame(self, text=" 견적내역 ", padding=8)
@@ -435,6 +460,107 @@ class App(tk.Tk):
         supply = sum(s for s, _ in amounts)
         tax = sum(t for _, t in amounts)
         self.total_lbl.config(text=f"공급가액 {supply:,}  +  세액 {tax:,}  =  총계 ₩{supply + tax:,}")
+
+    # ------------------------------------------------ 견적서 읽기
+    def set_api_key(self):
+        """Claude API 키를 settings.json 에 저장. 저장했으면 True"""
+        key = simpledialog.askstring(
+            "Claude API 키", "Claude API 키를 붙여 넣으세요. (sk-ant-…)\n"
+            "키는 이 PC의 settings.json 에만 저장되고 git에는 올라가지 않습니다.\n"
+            "비워 두고 확인을 누르면 저장된 키를 지웁니다.", show="*", parent=self)
+        if key is None:
+            return False
+        save_settings({**load_settings(), "anthropic_api_key": key.strip()})
+        return bool(key.strip())
+
+    def load_quote(self):
+        mode = READ_MODES[self.read_mode_var.get()]
+        api_key = load_settings().get("anthropic_api_key", "")
+        if mode == "claude" and not (api_key or os.environ.get("ANTHROPIC_API_KEY")):
+            messagebox.showinfo("API 키 필요", "Claude API 방식은 API 키가 필요합니다.", parent=self)
+            if not self.set_api_key():
+                return
+            api_key = load_settings().get("anthropic_api_key", "")
+        path = filedialog.askopenfilename(title="견적서 선택", filetypes=QUOTE_FILETYPES, parent=self)
+        if not path:
+            return
+
+        # 읽는 동안 창이 멈추지 않도록 따로 실행하고 끝날 때까지 확인
+        result = {}
+
+        def work():
+            try:
+                from quote_reader import read_quote
+                result["data"] = read_quote(path, mode, api_key)
+            except Exception as e:  # QuoteReadError 는 안내문, 그 밖은 예상 못 한 오류
+                result["error"] = e
+
+        self.quote_btn.state(["disabled"])
+        self.quote_status.config(text="읽는 중…")
+        self.config(cursor="watch")
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        self._wait_quote(thread, path, result)
+
+    def _wait_quote(self, thread, path, result):
+        if thread.is_alive():
+            self.after(200, self._wait_quote, thread, path, result)
+            return
+        self.quote_btn.state(["!disabled"])
+        self.quote_status.config(text="")
+        self.config(cursor="")
+        if "error" in result:
+            e = result["error"]
+            if type(e).__name__ == "QuoteReadError":
+                msg = str(e)
+            elif isinstance(e, ImportError):
+                msg = f"견적서 읽기에 필요한 패키지가 없습니다. 실행.bat으로 다시 실행해 주세요.\n{e}"
+            else:
+                msg = f"견적서를 읽지 못했습니다.\n{type(e).__name__}: {e}"
+            messagebox.showerror("견적서 읽기 실패", msg, parent=self)
+            return
+        self._apply_quote(path, result["data"])
+
+    def _apply_quote(self, path, data):
+        items = data["items"]
+        if not items:
+            hint = "Claude API 방식으로 다시 읽거나 " if READ_MODES[self.read_mode_var.get()] == "local" else ""
+            messagebox.showwarning("견적서 읽기", f"견적서에서 품목을 찾지 못했습니다.\n{hint}직접 입력해 주세요.\n\n"
+                                   + "\n".join(data["warnings"]), parent=self)
+            return
+        lines = [f"견적처 : {data['vendor'] or '(찾지 못함)'}"]
+        if data["target"]:
+            lines.append(f"구매대상 : {data['target']}")
+        lines.append(f"품목 {len(items)}개")
+        lines += [f"  {it['name']}  {it['qty']:,} x {it['price']:,}원 ({it['vat']})" for it in items[:10]]
+        if len(items) > 10:
+            lines.append(f"  … 외 {len(items) - 10}개")
+        if data["warnings"]:
+            lines += ["", "확인할 점"] + [f"  - {w}" for w in data["warnings"]]
+        if self.items:
+            lines += ["", "지금 입력된 견적내역은 지우고 새로 채웁니다."]
+        if not messagebox.askyesno("견적서 읽기 결과", "\n".join(lines) + "\n\n입력창에 채울까요?", parent=self):
+            return
+
+        if data["vendor"]:
+            self.vendor_var.set(data["vendor"])
+        if data["target"] and not self.target_var.get().strip():
+            self.target_var.set(data["target"])
+        self.tree.delete(*self.tree.get_children())
+        self.items.clear()
+        for it in items:
+            iid = self.tree.insert("", "end", values=self._row_values(it))
+            self.items[iid] = it
+        self._refresh()
+        # 읽은 파일을 견적서 붙임으로 연결 (비어 있는 견적서 칸이 없으면 새로 추가)
+        if not any(a["src"] == path for a in self.attaches.values()):
+            slot = next((iid for iid in self.attach_tree.get_children()
+                         if self.attaches[iid]["kind"] == "견적서" and not self.attaches[iid]["src"]), None)
+            if slot:
+                self.attaches[slot]["src"] = path
+                self.attach_tree.item(slot, values=self._attach_values(self.attaches[slot]))
+            else:
+                self._insert_attach({"kind": "견적서", "name": "", "count": 1, "src": path})
 
     # ------------------------------------------------ 생성
     @staticmethod

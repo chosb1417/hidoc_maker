@@ -5,13 +5,15 @@
 - 모든 글자와 공백을 크기·굵기를 지정한 span 안에 넣음
 - 표 너비는 % 와 width 속성, 굵게는 <b>, 정렬은 align 속성으로도 함께 지정
 - 테두리 없는 칸(제목, 붙임)은 표 대신 문단으로 작성
-copy_html(doc, items) 로 호출.
+copy_html(doc, items) 로 호출. 복사할 때마다 output/preview.html 에도 저장 (Live Server 로 미리보기).
 """
 
 from html import escape
+from pathlib import Path
 
 import win32clipboard
 
+PREVIEW_PATH = Path(__file__).resolve().parent / "output" / "preview.html"
 FONT = "font-family:'맑은 고딕','Malgun Gothic',sans-serif;"
 BASE_PX = 16
 NB = "&nbsp;"
@@ -125,8 +127,19 @@ def _cf_html(fragment: str) -> bytes:
     return (head.format(start_html, end_html, start_frag, end_frag) + pre + fragment + post).encode()
 
 
+def save_preview(fragment: str):
+    """브라우저 미리보기용. 하이웍스 작성 화면과 비슷한 폭의 흰 종이에 그림"""
+    page = ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>품의서 미리보기</title>'
+            '<style>body{background:#e5e5e5;margin:0;padding:24px;}'
+            '.paper{background:#fff;max-width:800px;margin:0 auto;padding:40px;box-shadow:0 1px 4px #0003;}</style>'
+            f'</head><body><div class="paper">\n{fragment}\n</div></body></html>')
+    PREVIEW_PATH.parent.mkdir(exist_ok=True)
+    PREVIEW_PATH.write_text(page, encoding="utf-8")
+
+
 def copy_html(doc: dict, items: list[dict]):
     html = build_html(doc, items)
+    save_preview(html)
     win32clipboard.OpenClipboard()
     try:
         win32clipboard.EmptyClipboard()

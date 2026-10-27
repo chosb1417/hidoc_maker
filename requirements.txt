@@ -1,1 +1,14 @@
 pywin32>=306
+# 견적서 읽기 (로컬: PDF 글자 + Windows OCR)
+pdfplumber>=0.11
+pypdfium2>=4.30
+pillow>=10.0
+winrt-runtime>=3.0
+winrt-Windows.Media.Ocr>=3.0
+winrt-Windows.Graphics.Imaging>=3.0
+winrt-Windows.Storage.Streams>=3.0
+winrt-Windows.Globalization>=3.0
+winrt-Windows.Foundation>=3.0
+winrt-Windows.Foundation.Collections>=3.0
+# 견적서 읽기 (Claude API)
+anthropic>=2.0

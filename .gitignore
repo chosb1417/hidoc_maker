@@ -8,3 +8,9 @@ __pycache__/
 # 한글 임시·백업 파일
 *.hwp~
 ~$*
+
+# 이 PC 설정 (저장 경로, Claude API 키)
+settings.json
+
+# 견적서 샘플 (거래 정보)
+samples/
