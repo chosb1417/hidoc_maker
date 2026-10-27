@@ -10,7 +10,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .settings import get_setting
+from .settings import get_setting, output_dir
 
 
 def attach_types() -> list[str]:
@@ -21,6 +21,17 @@ def attach_types() -> list[str]:
 def company_docs() -> set[str]:
     """기업 폴더 바로 아래에 날짜 없이 저장하는 기업 공통 서류 (설정 company_docs)"""
     return set(get_setting("company_docs"))
+
+
+def company_folders(save_dir=None) -> list[str]:
+    """저장 경로\\hidoc_output 안의 기업 폴더 이름들. 최근에 쓴 폴더가 앞. 폴더가 없으면 []
+    (견적처 드롭다운 목록. 폴더 이름은 safe_filename 을 거친 이름이라 공백은 _ 로 되어 있음)"""
+    root = output_dir(save_dir)
+    try:
+        folders = [p for p in root.iterdir() if p.is_dir()]
+    except OSError:
+        return []
+    return [p.name for p in sorted(folders, key=lambda p: p.stat().st_mtime, reverse=True)]
 
 
 def attach_line(kind: str, name: str, count: int) -> str:

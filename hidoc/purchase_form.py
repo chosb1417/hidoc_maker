@@ -14,8 +14,9 @@ from pathlib import Path
 from .money import VAT_MODES, split_amount
 from .quote_reader import READ_MODES
 from .settings import DEFAULT_SAVE_DIR, get_setting, output_dir, update_settings
-from .storage import attach_line, attach_types, copy_attachments, copy_name, safe_filename, unique_path
-from .widgets import add_placeholder, ask_api_key
+from .storage import (attach_line, attach_types, company_folders, copy_attachments, copy_name, safe_filename,
+                      unique_path)
+from .widgets import add_placeholder, add_suggestions, ask_api_key
 
 QUOTE_FILETYPES = [("견적서", "*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff"), ("모든 파일", "*.*")]
 
@@ -48,6 +49,11 @@ class PurchaseRequestForm(ttk.Frame):
         mode_label = {v: k for k, v in READ_MODES.items()}.get(get_setting("read_mode"), "로컬 (무료)")
         self.read_mode_var.set(mode_label)
         self.attach_kind_box.config(values=attach_types())
+        self._refresh_vendors()
+
+    def _refresh_vendors(self):
+        """견적처 드롭다운 목록 = 저장 경로\\hidoc_output 안의 기업 폴더"""
+        self.vendor_box.config(values=company_folders(self.save_dir_var.get().strip() or DEFAULT_SAVE_DIR))
 
     def _build_info(self):
         frm = ttk.LabelFrame(self, text=" 기본 정보 ", padding=8)
@@ -55,12 +61,18 @@ class PurchaseRequestForm(ttk.Frame):
         rows = [
             ("구매대상", self.target_var, "예) G.Eye-Parking H100 Multi 설계 및 3대 제작 선금"),
             ("제목", self.title_var, "비워두면 '구매대상 + 구매의 건'으로 자동 작성"),
-            ("견적처", self.vendor_var, "기업명 - 저장 폴더와 붙임 파일 이름에 사용"),
+            ("견적처", self.vendor_var, "기업명 - ▼ 목록에서 기존 기업을 고르거나 새로 입력 (저장 폴더·붙임 파일 이름에 사용)"),
             ("지급방식", self.payment_var, f"예) {get_setting('payment_example')}  - 비워 두면 품의서에서 지급방식 항목을 뺌"),
         ]
         for i, (label, var, hint) in enumerate(rows):
             ttk.Label(frm, text=label, width=9).grid(row=i, column=0, sticky="w", pady=2)
-            entry = ttk.Entry(frm, textvariable=var)
+            if var is self.vendor_var:
+                # 직접 입력도 되는 드롭다운. 목록은 hidoc_output 안의 기업 폴더 (열 때마다 새로 읽음)
+                entry = self.vendor_box = ttk.Combobox(frm, textvariable=var, postcommand=self._refresh_vendors)
+                # 입력하는 동안에도 같은 글자가 들어간 기존 기업을 칸 아래에 보여 줌
+                add_suggestions(entry, var, lambda: company_folders(self.save_dir_var.get().strip() or DEFAULT_SAVE_DIR))
+            else:
+                entry = ttk.Entry(frm, textvariable=var)
             entry.grid(row=i, column=1, columnspan=2, sticky="ew", pady=2)
             if hint:
                 add_placeholder(entry, hint, var)

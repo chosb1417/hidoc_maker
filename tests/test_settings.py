@@ -56,6 +56,24 @@ class StorageUsesSettingsTest(TempSettingsTest):
         self.assertEqual(storage.attach_types(), ["견적서", "계약서"])
 
 
+class CompanyFoldersTest(unittest.TestCase):
+    def test_lists_company_folders_newest_first(self):
+        import os, time
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "hidoc_output"
+            for name in ("엠에스산업", "한빛테크(주)"):
+                (root / name).mkdir(parents=True)
+            (root / "preview.html").write_text("x", encoding="utf-8")  # 파일은 목록에서 뺌
+            now = time.time()
+            os.utime(root / "엠에스산업", (now, now))
+            os.utime(root / "한빛테크(주)", (now - 100, now - 100))
+            self.assertEqual(storage.company_folders(tmp), ["엠에스산업", "한빛테크(주)"])
+
+    def test_missing_folder_is_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(storage.company_folders(tmp), [])
+
+
 class EnvironmentTest(unittest.TestCase):
     def test_run_checks_shape(self):
         rows = environment.run_checks()
