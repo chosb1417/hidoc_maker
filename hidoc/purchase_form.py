@@ -16,7 +16,7 @@ from .quote_reader import READ_MODES, SHOWN_READ_MODES
 from .settings import DEFAULT_SAVE_DIR, get_setting, output_dir, update_settings
 from .storage import (attach_line, attach_types, company_folders, copy_attachments, copy_name, safe_filename,
                       unique_path)
-from .widgets import add_placeholder, add_suggestions, ask_api_key
+from .widgets import add_placeholder, add_suggestions, ask_api_key, ask_choice
 
 NOTICE_COLOR = "#b45309"  # 주황: 안내·확인할 점
 QUOTE_FILETYPES = [("견적서", "*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff"), ("모든 파일", "*.*")]
@@ -403,7 +403,11 @@ class PurchaseRequestForm(ttk.Frame):
             if not ask_api_key(self):
                 return
             api_key = get_setting("anthropic_api_key")
-        path = filedialog.askopenfilename(title="견적서 선택", filetypes=QUOTE_FILETYPES,
+        self._choose_quote(mode, api_key)
+
+    def _choose_quote(self, mode, api_key, title="견적서 선택"):
+        """견적서 파일을 골라 읽기 시작. 유효일이 지나 다시 고를 때도 씀"""
+        path = filedialog.askopenfilename(title=title, filetypes=QUOTE_FILETYPES,
                                           initialdir=get_setting("quote_dir"), parent=self)
         if path:
             self._start_quote(path, mode, api_key)
@@ -464,6 +468,17 @@ class PurchaseRequestForm(ttk.Frame):
                 msg = f"견적서를 읽지 못했습니다.\n{type(e).__name__}: {e}"
             messagebox.showerror("견적서 읽기 실패", msg, parent=self)
             return
+        valid = result["data"]["valid_until"]
+        if valid and dt.date.fromisoformat(valid) < dt.date.today():  # 유효일 당일까지는 유효
+            answer = ask_choice(self, "견적서 유효일 지남",
+                                f"{Path(job[0]).name}\n견적 유효일({valid})이 지났습니다.\n\n"
+                                "다른 견적서를 고르거나, 이 견적서로 그냥 진행할 수 있습니다.",
+                                ["다시 선택", "그냥 진행", "취소"])
+            if answer == "다시 선택":
+                self._choose_quote(job[1], job[2], "견적서 다시 선택")
+                return
+            if answer != "그냥 진행":  # 취소·창 닫음: 지금 입력은 그대로
+                return
         self._apply_quote(job[0], result["data"])
 
     def _offer_step(self, job, title, question, starter, busy_text):
@@ -517,6 +532,10 @@ class PurchaseRequestForm(ttk.Frame):
                 self._insert_attach({"kind": "견적서", "name": "", "count": 1, "src": path})
 
         note = f"{Path(path).name} 불러옴: 견적처 {data['vendor'] or '(찾지 못함 - 직접 입력)'}, 품목 {len(items)}개"
+        if data["valid_until"]:
+            note += f", 유효일 {data['valid_until']}"
+            if dt.date.fromisoformat(data["valid_until"]) < dt.date.today():
+                note += " (지남)"
         if data["warnings"]:
             note += "\n확인할 점: " + " / ".join(data["warnings"])
         self.quote_note.config(text=note)

@@ -305,3 +305,39 @@ def ask_api_key(parent) -> bool:
         return False
     update_settings(anthropic_api_key=key.strip())
     return bool(key.strip())
+
+
+def ask_choice(parent, title, message, buttons, icon="warning"):
+    """버튼 이름을 직접 정하는 확인 창. 누른 버튼 글자를 돌려줌. 창을 닫거나 Esc 면 None
+    (messagebox 는 예/아니오 같은 정해진 버튼만 됨)"""
+    win = tk.Toplevel(parent)
+    win.title(title)
+    win.resizable(False, False)
+    win.transient(parent.winfo_toplevel())
+    choice = {}
+
+    body = ttk.Frame(win, padding=(16, 14, 16, 8))
+    body.pack(fill="both")
+    ttk.Label(body, image=f"::tk::icons::{icon}").pack(side="left", anchor="n", padx=(0, 12))
+    ttk.Label(body, text=message, justify="left").pack(side="left")
+    row = ttk.Frame(win, padding=(16, 4, 16, 14))
+    row.pack(fill="x")
+    for i, text in enumerate(reversed(buttons)):  # 오른쪽부터 채워 buttons 순서대로 보이게
+        btn = ttk.Button(row, text=text, command=lambda t=text: (choice.update(value=t), win.destroy()))
+        btn.pack(side="right", padx=(6, 0))
+        if i == len(buttons) - 1:
+            default = btn
+            btn.focus_set()  # 첫 버튼이 기본 (Enter)
+    # Enter: Tab 으로 옮긴 버튼이 있으면 그 버튼, 아니면 첫 버튼
+    win.bind("<Return>", lambda _e: (win.focus_get() if isinstance(win.focus_get(), ttk.Button) else default).invoke())
+    win.bind("<Escape>", lambda _e: win.destroy())
+
+    # 부모 창 가운데에 띄우고, 닫힐 때까지 다른 곳을 누르지 못하게
+    win.update_idletasks()
+    top = parent.winfo_toplevel()
+    x = top.winfo_rootx() + (top.winfo_width() - win.winfo_width()) // 2
+    y = top.winfo_rooty() + (top.winfo_height() - win.winfo_height()) // 3
+    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+    win.grab_set()
+    win.wait_window()
+    return choice.get("value")

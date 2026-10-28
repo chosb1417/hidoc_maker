@@ -4,10 +4,12 @@ read_quote(path, mode, api_key) 로 호출.
 - "local": PDF 글자 읽기(pdfplumber), 글자가 없으면 Windows OCR(한국어) + 규칙으로 품목 찾기. 무료
 - "claude": Claude API 가 문서를 직접 읽음. 인터넷과 API 키 필요, 견적서 내용이 Anthropic 으로 전송됨
 - "claude_code": 이 PC에 로그인된 Claude Code(claude -p)가 읽음. 본인 Claude 구독 사용량에서 차감
-결과: {"vendor": str, "target": str, "items": [{name, qty, price, vat, note}], "warnings": [str]}
+결과: {"vendor": str, "target": str, "items": [{name, qty, price, vat, note}], "warnings": [str],
+       "valid_until": 견적 유효일 "YYYY-MM-DD" (못 찾으면 "")}
 """
 
 import base64
+import datetime as dt
 import glob
 import io
 import json
@@ -32,6 +34,8 @@ MIN_TEXT_CHARS = 30  # PDF에서 뽑힌 글자가 이보다 적으면 스캔본�
 ROW_TOLERANCE = 0.6  # 글자 높이의 이 비율 안에 있으면 같은 줄
 UNITS = r"EA|ea|Ea|개|식|대|SET|set|Set|매|본|롤|박스|BOX|box|KG|kg|M|m|EA\.|ea\."
 TOTAL_WORDS = ("합계", "총계", "소계", "공급가액", "부가세", "세액", "총액", "견적금액")  # 공백 뺀 줄 앞부분과 비교
+DATE_PATTERN = r"(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})"  # 2026.11.30, 2026-11-30, 2026년 11월 30일
+QUOTE_DATE_WORDS = ("견적일", "작성일", "일자", "날짜")  # 견적일이 적힌 줄 (공백 뺀 줄과 비교)
 
 CLAUDE_MODEL = "claude-opus-5-5"
 CLAUDE_PROMPT = """첨부한 견적서에서 구매 품의서 작성에 필요한 내용을 뽑아 주세요.
@@ -43,8 +47,11 @@ CLAUDE_PROMPT = """첨부한 견적서에서 구매 품의서 작성에 필요�
   - price: 단가 (원, 정수)
   - vat: 단가에 부가세가 빠져 있으면 "별도", 들어 있으면 "포함", 면세·영세율이면 "없음"
   - note: 비고. 없으면 빈 문자열
+- valid_until: 견적 유효기간의 마지막 날 "YYYY-MM-DD". "견적일로부터 30일"처럼 적혀 있으면 견적일에 더해 계산.
+  적혀 있지 않으면 빈 문자열
 - warnings: 사람이 확인해야 할 점. 할인 줄(items 에 넣지 말고 금액과 함께 적음), 소수 수량,
-  흐려서 확실히 읽지 못한 글자, 견적서 합계와 품목 합이 다른 경우 등. 없으면 빈 목록"""
+  흐려서 확실히 읽지 못한 글자, 견적서 합계와 품목 합이 다른 경우 등. 없으면 빈 목록.
+  유효기간이 지났다는 내용은 프로그램이 valid_until 로 따로 알리므로 넣지 않음"""
 CLAUDE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -66,8 +73,9 @@ CLAUDE_SCHEMA = {
             },
         },
         "warnings": {"type": "array", "items": {"type": "string"}},
+        "valid_until": {"type": "string"},
     },
-    "required": ["vendor", "target", "items", "warnings"],
+    "required": ["vendor", "target", "items", "warnings", "valid_until"],
     "additionalProperties": False,
 }
 # Claude Code 의 Read 도구가 그대로 읽는 형식. 나머지(bmp, tif)는 png 로 바꿔서 넘김
@@ -75,6 +83,8 @@ CLAUDE_CODE_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
 CLAUDE_CODE_TIMEOUT = 300  # 초
 # PATH 에 claude 가 없을 때 찾아볼 곳: 공식 설치 위치(방금 설치해 PATH 가 아직 안 바뀐 경우), VS Code 확장
 CLAUDE_CODE_NATIVE = Path.home() / ".local" / "bin" / "claude.exe"
+# npm 설치(claude.cmd)일 때 그 옆에서 찾을 실제 실행 파일
+CLAUDE_CODE_NPM_EXE = Path("node_modules") / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
 CLAUDE_CODE_GLOB = str(Path.home() / ".vscode" / "extensions" / "anthropic.claude-code-*" / "resources"
                        / "native-binary" / "claude.exe")
 # Anthropic 공식 설치 명령 (code.claude.com/docs/en/setup). 관리자 권한 불필요
@@ -312,7 +322,44 @@ def _parse_rows(rows):
             warnings.append(f"견적서 합계({max(quoted):,}원)와 읽은 품목의 합계({total:,}원)가 다릅니다. "
                             "빠진 품목이나 잘못 읽은 숫자가 있는지 확인하세요.")
 
-    return {"vendor": _find_vendor(rows), "target": "", "items": items, "warnings": warnings}
+    valid_until, warning = _find_valid_until(rows)
+    if warning:
+        warnings.append(warning)
+    return {"vendor": _find_vendor(rows), "target": "", "items": items, "warnings": warnings,
+            "valid_until": valid_until}
+
+
+def _parse_date(text):
+    """글자 안의 첫 날짜 -> date. 없거나 잘못된 날짜면 None"""
+    m = re.search(DATE_PATTERN, text or "")
+    if not m:
+        return None
+    try:
+        return dt.date(*map(int, m.groups()))
+    except ValueError:
+        return None
+
+
+def _find_valid_until(rows):
+    """'유효' 줄에서 견적 유효일. ("YYYY-MM-DD" 또는 "", 경고 또는 None)
+
+    날짜가 적혀 있으면 그 날, '견적일로부터 30일'처럼 일수만 있으면 견적일 + 일수
+    """
+    for r in rows:
+        if "유효" not in r.replace(" ", ""):
+            continue
+        day = _parse_date(r)
+        if day:
+            return day.isoformat(), None
+        m = re.search(r"(\d+)\s*일", r)
+        if not m:
+            continue
+        quoted = next((d for d in (_parse_date(x) for x in rows if any(w in x.replace(" ", "") for w in QUOTE_DATE_WORDS))
+                       if d), None) or next((d for d in map(_parse_date, rows) if d), None)
+        if not quoted:
+            return "", f"견적 유효기간이 {m.group(1)}일로 적혀 있지만 견적일을 찾지 못했습니다. 유효일을 확인하세요."
+        return (quoted + dt.timedelta(days=int(m.group(1)))).isoformat(), None
+    return "", None
 
 
 # ---------------------------------------------------------------- Claude API
@@ -376,14 +423,20 @@ def _from_claude(data):
     """CLAUDE_SCHEMA 형식 결과를 입력창용으로 정리"""
     items = [{"name": it["name"].strip(), "qty": max(1, int(it["qty"])), "price": max(0, int(it["price"])),
               "vat": it["vat"], "note": it["note"].strip()} for it in data["items"]]
+    valid = _parse_date(data["valid_until"])
     return {"vendor": _company(data["vendor"]), "target": data["target"].strip(),
-            "items": items, "warnings": data["warnings"]}
+            "items": items, "warnings": data["warnings"], "valid_until": valid.isoformat() if valid else ""}
 
 
 # ---------------------------------------------------------------- Claude Code (구독)
 def find_claude_code():
     """claude 실행 파일 경로. PATH 에 없으면 VS Code 확장 안에서 가장 최근 것. 없으면 None"""
     found = shutil.which("claude")
+    if found and Path(found).suffix.lower() in (".cmd", ".bat"):
+        # npm 설치의 claude.cmd 는 cmd.exe 를 거쳐 실행돼 줄바꿈이 든 인자(프롬프트)에서 뒤 옵션이 잘림
+        # (--output-format json 등이 빠져 일반 글로 답함) -> 안에 있는 claude.exe 를 직접 씀
+        npm_exe = Path(found).parent / CLAUDE_CODE_NPM_EXE
+        found = str(npm_exe) if npm_exe.is_file() else None
     if found:
         return found
     if CLAUDE_CODE_NATIVE.is_file():

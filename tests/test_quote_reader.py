@@ -2,7 +2,7 @@
 
 import unittest
 
-from hidoc.quote_reader import _company, _find_vendor, _number, _parse_rows
+from hidoc.quote_reader import _company, _find_valid_until, _find_vendor, _from_claude, _number, _parse_rows
 
 
 class NumberTest(unittest.TestCase):
@@ -44,6 +44,7 @@ class ParseRowsTest(unittest.TestCase):
         self.assertEqual([(i["name"], i["qty"], i["price"], i["vat"], i["note"]) for i in r["items"]],
                          [("산업용 카메라 GE-200", 2, 450000, "별도", ""), ("설치비", 1, 360000, "별도", "현장")])
         self.assertEqual(r["warnings"], [])
+        self.assertEqual(r["valid_until"], "")
 
     def test_included_vat(self):
         r = _parse_rows(["NO 품목 수량 단가 공급가액 세액 합계",
@@ -58,6 +59,29 @@ class ParseRowsTest(unittest.TestCase):
     def test_warns_when_total_differs(self):
         r = _parse_rows(["품명 수량 단가 금액", "볼트 10 1,200 12,000", "합계 99,000"])
         self.assertTrue(any("합계" in w for w in r["warnings"]))
+
+
+class ValidUntilTest(unittest.TestCase):
+    def test_written_date(self):
+        for row in ("유효기간 : 2026.11.30", "견적 유효일 2026-11-30 까지", "유 효 기 간  2026년 11월 30일"):
+            self.assertEqual(_find_valid_until(["견적서", row]), ("2026-11-30", None))
+
+    def test_days_from_quote_date(self):
+        rows = ["견적일자 : 2026.10.20", "유효기간 : 견적일로부터 30일"]
+        self.assertEqual(_find_valid_until(rows), ("2026-11-19", None))
+
+    def test_days_without_quote_date(self):
+        valid, warning = _find_valid_until(["유효기간 : 견적일로부터 30일"])
+        self.assertEqual(valid, "")
+        self.assertIn("견적일", warning)
+
+    def test_not_written(self):
+        self.assertEqual(_find_valid_until(["견적일자 2026.10.20", "합계 1,000"]), ("", None))
+
+    def test_claude_result_checked(self):
+        data = {"vendor": "(주)한빛테크", "target": "", "items": [], "warnings": []}
+        self.assertEqual(_from_claude({**data, "valid_until": "2026-11-30"})["valid_until"], "2026-11-30")
+        self.assertEqual(_from_claude({**data, "valid_until": "30일"})["valid_until"], "")
 
 
 if __name__ == "__main__":
