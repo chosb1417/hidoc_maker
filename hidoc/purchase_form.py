@@ -18,7 +18,8 @@ from .quote_reader import READ_MODES
 from .settings import DEFAULT_SAVE_DIR, get_setting, output_dir
 from .storage import (attach_line, attach_types, company_folders, copy_attachments, copy_name, safe_filename,
                       unique_path)
-from .widgets import add_placeholder, add_suggestions, ask_api_key, ask_choice, stripe_rows, style_table
+from .widgets import (FIELD_BORDER, FIELD_FOCUS, TABLE_FONT, add_placeholder, add_suggestions, ask_api_key,
+                      ask_choice, stripe_rows, style_table)
 
 NOTICE_COLOR = "#b45309"  # 주황: 안내·확인할 점
 EDIT_COLS = ["name", "qty", "price", "vat", "note"]  # 견적내역 표에서 입력하는 열 (나머지는 계산값)
@@ -129,12 +130,16 @@ class PurchaseRequestForm(ttk.Frame):
         for i, (label, var, hint) in enumerate(rows):
             ttk.Label(frm, text=label, width=9).grid(row=i, column=0, sticky="nw", pady=2)
             if var is None:  # 지급방식 상세: 한 줄에 하나
-                self.detail_txt = tk.Text(frm, height=3, font=("맑은 고딕", 10))
+                # 여러 줄 칸은 ttk 가 아니라서 테두리를 강조선(highlight)으로 한 줄 칸과 같게 그림
+                self.detail_txt = tk.Text(frm, height=3, font=("맑은 고딕", 10), relief="flat", borderwidth=2,
+                                          highlightthickness=1, highlightbackground=FIELD_BORDER,
+                                          highlightcolor=FIELD_FOCUS)
                 self.detail_txt.grid(row=i, column=1, sticky="ew", pady=2)  # 예시 글자 없음 (여러 줄 칸은 겹쳐 그려야 해서)
                 continue
             if var is self.vendor_var:
                 # 직접 입력도 되는 드롭다운. 목록은 hidoc_output 안의 기업 폴더 (열 때마다 새로 읽음)
-                entry = self.vendor_box = ttk.Combobox(frm, textvariable=var, postcommand=self._refresh_vendors)
+                entry = self.vendor_box = ttk.Combobox(frm, textvariable=var, postcommand=self._refresh_vendors,
+                                                       style="Wide.TCombobox")  # 화살표 버튼을 넓게
                 # 입력하는 동안에도 같은 글자가 들어간 기존 기업을 칸 아래에 보여 줌
                 add_suggestions(entry, var, lambda: company_folders(self._save_dir()))
             else:
@@ -220,19 +225,28 @@ class PurchaseRequestForm(ttk.Frame):
         row.pack(fill="x")
         ttk.Label(row, text="종류").pack(side="left")
         # 목록에 없는 종류도 직접 입력 가능
-        self.attach_kind_box = ttk.Combobox(row, textvariable=self.attach_kind, values=attach_types(), width=13)
+        self.attach_kind_box = ttk.Combobox(row, textvariable=self.attach_kind, values=attach_types(), width=13,
+                                            style="Wide.TCombobox")  # 화살표 버튼을 넓게
         self.attach_kind_box.pack(side="left", padx=(4, 10))
         add_placeholder(self.attach_kind_box, "선택")
         ttk.Label(row, text="이름").pack(side="left")
-        name = ttk.Entry(row, textvariable=self.attach_name, width=18)
+        name = ttk.Entry(row, textvariable=self.attach_name, width=24)
         name.pack(side="left", padx=(4, 4), fill="x", expand=True)
-        add_placeholder(name, "비우면 기업명")
+        add_placeholder(name, "비우면 [종류]기업명_날짜")  # 복사될 파일 이름 규칙 (storage.copy_name)
         # 체크하면 복사될 파일 이름이 [종류]이름_날짜 대신 쓴 이름 그대로 (이름을 비우면 체크해도 [종류]기업명_날짜)
         ttk.Checkbutton(row, text="그대로 파일명", variable=self.attach_as_is).pack(side="left", padx=(0, 10))
         ttk.Label(row, text="부수").pack(side="left")
-        ttk.Spinbox(row, textvariable=self.attach_count, from_=1, to=99, width=3).pack(side="left", padx=(4, 10))
+        # 입력칸 + [+][−] 버튼 (키보드 ↑↓도). 숫자 칸(Spinbox)은 화살표가 위아래로 쌓여 다른 칸보다 높아서 안 씀
+        count = ttk.Entry(row, textvariable=self.attach_count, width=3, justify="center")
+        count.pack(side="left", padx=(4, 2), fill="y")
+        for text, step in (("+", 1), ("−", -1)):
+            ttk.Button(row, text=text, width=2, style="Step.TButton",
+                       command=lambda s=step: self._step_count(s)).pack(side="left", fill="y", padx=(0, 2))
+        count.bind("<Up>", lambda _e: self._step_count(1))
+        count.bind("<Down>", lambda _e: self._step_count(-1))
+        ttk.Frame(row, width=8).pack(side="left")
         ttk.Label(row, text="파일").pack(side="left")
-        ttk.Entry(row, textvariable=self.attach_src, state="readonly", width=18).pack(
+        ttk.Entry(row, textvariable=self.attach_src, state="readonly", width=12).pack(
             side="left", padx=(4, 2), fill="x", expand=True)
         ttk.Button(row, text="파일…", width=5, command=self.choose_attach_file).pack(side="left", padx=(0, 10))
         self.attach_btns = ttk.Frame(row, width=230)
@@ -295,6 +309,14 @@ class PurchaseRequestForm(ttk.Frame):
             count = 1
         return {"kind": kind, "name": self.attach_name.get().strip(), "count": count, "src": self.attach_src.get(),
                 "as_is": self.attach_as_is.get()}
+
+    def _step_count(self, step):
+        try:
+            count = int(self.attach_count.get().strip() or 0)
+        except ValueError:
+            count = 0
+        self.attach_count.set(str(max(1, count + step)))
+        return "break"  # ↑↓ 키의 기본 동작은 막음
 
     def _clear_attach_entry(self):
         self.attach_kind.set("")  # 다음 붙임도 종류를 새로 고르게 ('선택' 표시)
@@ -372,7 +394,8 @@ class PurchaseRequestForm(ttk.Frame):
     # ------------------------------------------------ 품목 조작 (표 칸을 누르면 그 자리에 입력칸이 뜸)
     def _row_values(self, d):
         supply, tax = split_amount(d["qty"], d["price"], d["vat"])
-        return (d["name"], f"{d['qty']:,}", f"{d['price']:,}", d["vat"], f"{supply:,}", f"{tax:,}",
+        # 세액구분 뒤 ▾ : 눌러서 고르는 칸이라는 표시 (표에만 보이고 값에는 안 들어감)
+        return (d["name"], f"{d['qty']:,}", f"{d['price']:,}", f"{d['vat']}  ▾", f"{supply:,}", f"{tax:,}",
                 f"{supply + tax:,}", d["note"])
 
     def _insert_item(self, d):
@@ -413,7 +436,7 @@ class PurchaseRequestForm(ttk.Frame):
             return
         d = self.items.get(row)
         value = "" if d is None else d[col]
-        ed = ttk.Entry(self.tree, justify="right" if col in ("qty", "price") else "left")
+        ed = ttk.Entry(self.tree, justify="right" if col in ("qty", "price") else "left", font=TABLE_FONT)
         ed.insert(0, f"{value:,}" if isinstance(value, int) else value)
         ed.select_range(0, "end")
         ed.place(x=x, y=y, width=w, height=h)

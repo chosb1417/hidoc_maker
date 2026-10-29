@@ -177,11 +177,16 @@ def add_placeholder(widget, text):
         pass
 
 
+TABLE_FONT = ("맑은 고딕", 11)  # 견적내역·붙임 표 글자 (제목 줄은 굵게)
 TABLE_STRIPE = "#e9ebee"  # 표 줄무늬 (회색, 흰색과 번갈아)
 TABLE_LINE = "#c9cdd3"  # 표 세로 칸선 (옅은 회색)
 TABLE_HEADING = "#dfe2e6"  # 표 제목 줄 배경
 TABLE_HEADING_HOVER = "#d1d5db"  # 제목 칸에 마우스를 올렸을 때
 TABLE_SELECTED = "#cfe2fb"  # 선택한 줄 (옅은 파랑, 줄무늬 회색과 구별)
+FRAME_BORDER = "#c4c8ce"  # 기본 정보·견적내역·붙임 상자 테두리
+FIELD_BORDER = "#a9aeb6"  # 입력칸 테두리
+FIELD_FOCUS = "#3b82f6"  # 입력 중인 칸 테두리 (파랑)
+FIELD_READONLY = "#f3f4f6"  # 읽기 전용 칸 배경 (붙임 파일 경로 등)
 
 
 def style_table(tree):

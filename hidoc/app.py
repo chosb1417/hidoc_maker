@@ -6,11 +6,13 @@
 """
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from .documents import DOCUMENTS
 from .settings_view import SettingsView
-from .widgets import TABLE_HEADING, TABLE_HEADING_HOVER, TABLE_SELECTED, enable_inline_ime
+from .widgets import (FIELD_BORDER, FIELD_FOCUS, FIELD_READONLY, FRAME_BORDER, TABLE_FONT, TABLE_HEADING,
+                      TABLE_HEADING_HOVER, TABLE_SELECTED, enable_inline_ime)
 
 APP_TITLE = "hidoc maker"
 
@@ -24,9 +26,17 @@ class MainWindow(tk.Tk):
         style = ttk.Style(self)
         style.configure(".", font=("맑은 고딕", 10))
         self._style_tables(style)
+        self._style_fields(style)
+        # 기본 정보·견적내역·붙임 상자 테두리를 진하게. Windows 기본(vista) 상자 테두리는 색을 못 바꿔서 clam 테마 요소를 씀
+        style.element_create("Dark.Labelframe.border", "from", "clam")
+        style.layout("TLabelframe", [("Dark.Labelframe.border", {"sticky": "nswe"})])
+        # clam 테두리는 solid 면 2px 로 그려서 groove(1px 바깥선) + 안쪽 보조선(light/dark)은 배경색으로 숨김
+        style.configure("TLabelframe", bordercolor=FRAME_BORDER, lightcolor="SystemButtonFace",
+                        darkcolor="SystemButtonFace", relief="groove", borderwidth=1)
         style.configure("Doc.TButton", font=("맑은 고딕", 12, "bold"), padding=(16, 12), anchor="w")
         style.configure("Title.TLabel", font=("맑은 고딕", 14, "bold"))
         style.configure("Primary.TButton", font=("맑은 고딕", 11, "bold"), padding=(18, 6))  # 한글 생성 등 마지막 단계 버튼
+        style.configure("Step.TButton", padding=0)  # 붙임 부수 [+][−] 버튼 (작게)
 
         self.forms = {}  # 문서 key -> 작성 화면 (한 번 만들고 유지)
         self.current = None
@@ -34,6 +44,26 @@ class MainWindow(tk.Tk):
         self._build_doc_page()
         self.home.pack(fill="both", expand=True, padx=10, pady=10)
         enable_inline_ime(self)  # 한글 조합 중인 글자를 떠 있는 상자 대신 입력칸 본문 자리에 바로 표시
+
+    @staticmethod
+    def _style_fields(style):
+        """입력칸(한 줄 칸·드롭다운) 테두리를 회색으로 보이게, 입력 중인 칸은 파랑.
+        Windows 기본(vista) 입력칸 테두리는 회색 배경에 묻히고 색도 못 바꿔서 clam 테마의 칸 요소를 씀"""
+        for name in ("Entry.field", "Combobox.field", "Combobox.downarrow"):
+            style.element_create(f"Box.{name}", "from", "clam")
+        style.layout("TEntry", [("Box.Entry.field", {"sticky": "nswe", "children": [
+            ("Entry.padding", {"sticky": "nswe", "children": [("Entry.textarea", {"sticky": "nswe"})]})]})])
+        style.layout("TCombobox", [("Box.Combobox.field", {"sticky": "nswe", "children": [
+            ("Box.Combobox.downarrow", {"side": "right", "sticky": "ns"}),
+            ("Combobox.padding", {"sticky": "nswe", "children": [("Combobox.textarea", {"sticky": "nswe"})]})]})])
+        for name in ("TEntry", "TCombobox"):
+            style.configure(name, bordercolor=FIELD_BORDER, lightcolor="white", darkcolor="white",
+                            fieldbackground="white", padding=(4, 2), arrowcolor="#4b5563", arrowsize=12,
+                            background="white")  # 드롭다운 화살표 바탕
+            style.map(name, bordercolor=[("focus", FIELD_FOCUS)], lightcolor=[("focus", FIELD_FOCUS)],
+                      fieldbackground=[("readonly", FIELD_READONLY) if name == "TEntry" else ("readonly", "white"),
+                                       ("disabled", FIELD_READONLY)])
+        style.configure("Wide.TCombobox", arrowsize=20)  # 견적처: 화살표 버튼을 넓게 (누르기 쉽게)
 
     @staticmethod
     def _style_tables(style):
@@ -48,10 +78,12 @@ class MainWindow(tk.Tk):
                     ("Treeheading.image", {"side": "right", "sticky": ""}),
                     ("Treeheading.text", {"sticky": "we"})]})]}),
         ])
-        style.configure("Treeview.Heading", font=("맑은 고딕", 10, "bold"), background=TABLE_HEADING,
+        style.configure("Treeview.Heading", font=(*TABLE_FONT, "bold"), background=TABLE_HEADING,
                         relief="raised", borderwidth=1, padding=(4, 3))
         style.map("Treeview.Heading", background=[("active", TABLE_HEADING_HOVER)], relief=[("pressed", "raised")])
         style.map("Treeview", background=[("selected", TABLE_SELECTED)], foreground=[("selected", "black")])
+        # 표 글자는 다른 곳(10pt)보다 크게. 줄 높이는 글자 높이에 맞춰 늘림 (Treeview 는 자동으로 안 늘어남)
+        style.configure("Treeview", font=TABLE_FONT, rowheight=tkfont.Font(font=TABLE_FONT).metrics("linespace") + 6)
 
     # ------------------------------------------------ 첫 화면
     def _build_home(self):
