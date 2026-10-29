@@ -46,14 +46,32 @@ class GetSettingTest(TempSettingsTest):
 
 
 class StorageUsesSettingsTest(TempSettingsTest):
-    def test_default_company_docs(self):
-        self.assertEqual(storage.copy_name("통장사본", "한빛테크(주)", "a.pdf", "261028"), "[통장사본]한빛테크(주).pdf")
+    def test_copy_name(self):
+        # 기업 공통 서류도 날짜를 붙임 (저장 위치만 날짜 폴더 밖)
+        self.assertEqual(storage.copy_name("통장사본", "한빛테크(주)", "a.pdf", "261028"), "[통장사본]한빛테크(주)_261028.pdf")
         self.assertEqual(storage.copy_name("견적서", "한빛테크(주)", "a.pdf", "261028"), "[견적서]한빛테크(주)_261028.pdf")
+        self.assertEqual(storage.copy_name("견적서", "H100 설계", "a.pdf", "261028", as_is=True), "H100_설계.pdf")
 
     def test_custom_attach_settings(self):
-        self.write({"company_docs": ["견적서"], "attach_types": ["견적서", "계약서"]})
-        self.assertEqual(storage.copy_name("견적서", "한빛", "a.pdf", "261028"), "[견적서]한빛.pdf")
+        self.write({"attach_types": ["견적서", "계약서"]})
         self.assertEqual(storage.attach_types(), ["견적서", "계약서"])
+
+    def test_company_docs_outside_date_folder_and_kept_if_same(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            src = tmp / "통장.pdf"
+            src.write_bytes(b"same")
+            company, folder = tmp / "한빛", tmp / "한빛" / "261030"
+            folder.mkdir(parents=True)
+            (company / "[통장사본]한빛.pdf").write_bytes(b"same")  # 예전(날짜 없는 이름)에 저장한 같은 파일
+            est = tmp / "견적.pdf"
+            est.write_bytes(b"x")
+            copied = storage.copy_attachments([("통장사본", "한빛", str(src), False), ("견적서", "한빛", str(est), False)],
+                                              company, folder, "261030", set())
+            self.assertEqual(copied, ["[통장사본]한빛.pdf (같은 파일이 있어 유지)", str(Path("261030") / "[견적서]한빛_261030.pdf")])
+            src.write_bytes(b"new")  # 내용이 바뀌면 날짜를 붙여 기업 폴더에 새로 저장
+            copied = storage.copy_attachments([("통장사본", "한빛", str(src), False)], company, folder, "261030", set())
+            self.assertEqual(copied, ["[통장사본]한빛_261030.pdf"])
 
 
 class CompanyFoldersTest(unittest.TestCase):

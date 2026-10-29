@@ -168,37 +168,52 @@ def ime_cancel():
         _imm32.ImmReleaseContext(hwnd, himc)
 
 
-def add_placeholder(widget, text, var=None):
-    """입력칸이 비어 있을 때만 안쪽에 회색 예시 글자를 보여 줌. 입력값에는 들어가지 않음.
-    한 줄 입력칸은 Tk 9 의 placeholder 옵션을 쓰고, 그 옵션이 없는 경우(Tk 8.6, 여러 줄 Text)는
-    입력칸 위에 회색 글자를 겹쳐 놓음. Entry 는 var, Text 는 내용으로 비었는지 판단"""
-    is_text = isinstance(widget, tk.Text)
-    if not is_text:
-        try:
-            widget.configure(placeholder=text)
-            return
-        except tk.TclError:  # Tk 8.6
-            pass
-    hint = tk.Label(widget, text=text, fg="gray", bg=widget.cget("background") if is_text else "SystemWindow",
-                    font=("맑은 고딕", 10), justify="left", padx=0, pady=0, cursor="xterm")
-    hint.bind("<Button-1>", lambda _e: widget.focus_set())  # 예시 글자를 눌러도 입력칸으로
+def add_placeholder(widget, text):
+    """한 줄 입력칸이 비어 있을 때만 안쪽에 회색 예시 글자를 보여 줌. 입력값에는 들어가지 않음.
+    Tk 9 입력칸 자체의 placeholder 옵션만 씀 (다른 개체를 겹쳐 놓지 않음). Tk 8.6 이면 예시 글자 없이 빈 칸"""
+    try:
+        widget.configure(placeholder=text)
+    except tk.TclError:  # Tk 8.6
+        pass
 
-    def refresh(*_):
-        if widget.get("1.0", "end-1c") if is_text else var.get():
-            hint.place_forget()
-        elif is_text:
-            hint.place(x=3, y=3)
-        else:
-            hint.place(x=4, rely=0.5, anchor="w")
 
-    if is_text:
-        def on_modified(_e):
-            refresh()
-            widget.edit_modified(False)  # 다음 변경도 알림을 받도록
-        widget.bind("<<Modified>>", on_modified, add="+")
-    else:
-        var.trace_add("write", refresh)
-    refresh()
+TABLE_STRIPE = "#e9ebee"  # 표 줄무늬 (회색, 흰색과 번갈아)
+TABLE_LINE = "#c9cdd3"  # 표 세로 칸선 (옅은 회색)
+TABLE_HEADING = "#dfe2e6"  # 표 제목 줄 배경
+TABLE_HEADING_HOVER = "#d1d5db"  # 제목 칸에 마우스를 올렸을 때
+TABLE_SELECTED = "#cfe2fb"  # 선택한 줄 (옅은 파랑, 줄무늬 회색과 구별)
+
+
+def style_table(tree):
+    """표(Treeview)에 줄무늬 색과 옅은 세로 칸선을 넣음. 줄이 바뀔 때마다 stripe_rows 를 불러야 함.
+    Treeview 에는 칸선 기능이 없어서 1px 선을 열 경계에 얹고, 선을 눌러도 표를 누른 것으로 넘겨 줌"""
+    tree.tag_configure("odd", background=TABLE_STRIPE)
+    lines = [tk.Frame(tree, width=1, bg=TABLE_LINE) for _ in tree["columns"][:-1]]
+
+    def forward(e, line):
+        x, y = line.winfo_x() + e.x, line.winfo_y() + e.y
+        tree.event_generate("<Button-1>", x=x, y=y)
+
+    for line in lines:
+        line.bind("<Button-1>", lambda e, ln=line: forward(e, ln))
+
+    def place_lines(_e=None):
+        x = 1  # 표 테두리
+        for line, col in zip(lines, tree["columns"]):
+            x += int(tree.column(col, "width"))
+            line.place(x=x - 1, y=0, relheight=1)
+            line.lower()  # 표 위에 띄우는 입력칸보다 아래
+
+    tree.bind("<Configure>", lambda _e: tree.after_idle(place_lines), add="+")
+    tree.bind("<ButtonRelease-1>", lambda _e: tree.after_idle(place_lines), add="+")  # 열 너비를 끌어 바꾼 뒤
+    place_lines()
+
+
+def stripe_rows(tree):
+    """표의 줄을 위에서부터 흰색·옅은 회색 번갈아 칠함 (줄의 다른 태그는 그대로)"""
+    for i, iid in enumerate(tree.get_children()):
+        tags = [t for t in tree.item(iid, "tags") if t != "odd"]
+        tree.item(iid, tags=tags + ["odd"] if i % 2 else tags)
 
 
 def add_suggestions(entry, var, get_items, limit=8):

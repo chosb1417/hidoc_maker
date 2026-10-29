@@ -1,11 +1,13 @@
 """저장 폴더 구조, 파일 이름, 붙임 파일 복사
 
 저장경로/hidoc_output/기업명/      (저장 경로를 어디로 고르든 hidoc_output 폴더를 만듦: settings.output_dir)
-    [사업자등록증]기업명.확장자, [통장사본]기업명.확장자   (기업 공통 서류)
+    [사업자등록증]기업명_YYMMDD.확장자, [통장사본]기업명_YYMMDD.확장자   (기업 공통 서류: 날짜 폴더 밖)
     YYMMDD/[품의서]기업명_YYMMDD.hwp, [견적서]기업명_YYMMDD.확장자 ...
+붙임마다 '이름 그대로 파일명'을 고르면 [종류]·날짜 없이 쓴 이름.확장자
 """
 
 import filecmp
+import glob
 import re
 import shutil
 from pathlib import Path
@@ -54,32 +56,43 @@ def unique_path(path: Path, taken: set) -> Path:
     return cand
 
 
-def copy_name(kind: str, name: str, src: str, date: str) -> str:
-    """복사될 파일 이름: 기업 공통 서류는 [종류]기업명.확장자, 나머지는 [종류]기업명_YYMMDD.확장자"""
-    result = f"[{kind}]{safe_filename(name)}"
-    if kind not in company_docs():
-        result += f"_{date}"
-    return result + Path(src).suffix
+def copy_name(kind: str, name: str, src: str, date: str, as_is: bool = False) -> str:
+    """복사될 파일 이름: [종류]이름_YYMMDD.확장자 (이름을 비우면 부르는 쪽에서 기업명을 넘김).
+    as_is 면 쓴 이름 그대로 이름.확장자"""
+    if as_is:
+        return safe_filename(name) + Path(src).suffix
+    return f"[{kind}]{safe_filename(name)}_{date}{Path(src).suffix}"
 
 
-def copy_attachments(attaches: list[tuple[str, str, str]], company_dir: Path, folder: Path, date: str,
+def _same_file_in(company_dir: Path, kind: str, name: str, src: Path, as_is: bool):
+    """기업 폴더에 내용이 같은 기업 공통 서류가 이미 있으면 그 파일 (날짜만 다른 이름, 예전의 날짜 없는 이름 포함)"""
+    if as_is:
+        candidates = [company_dir / copy_name(kind, name, src, "", True)]
+    else:
+        stem = glob.escape(f"[{kind}]{safe_filename(name)}")
+        candidates = [Path(p) for pattern in (f"{stem}_*{src.suffix}", f"{stem}{src.suffix}")
+                      for p in glob.glob(str(company_dir / pattern))]
+    return next((c for c in candidates if c.is_file() and filecmp.cmp(src, c, shallow=False)), None)
+
+
+def copy_attachments(attaches: list[tuple[str, str, str, bool]], company_dir: Path, folder: Path, date: str,
                      taken: set) -> list[str]:
-    """(종류, 이름, 원본 경로) 목록을 복사하고, 기업 폴더 기준 결과 목록을 돌려줌.
-    기업 공통 서류는 기업 폴더에(같은 파일이 이미 있으면 그대로 둠), 나머지는 날짜 폴더에 저장"""
+    """(종류, 이름, 원본 경로, 이름 그대로) 목록을 복사하고, 기업 폴더 기준 결과 목록을 돌려줌.
+    기업 공통 서류는 날짜 폴더가 아닌 기업 폴더에(내용이 같은 파일이 이미 있으면 그대로 둠), 나머지는 날짜 폴더에 저장"""
     copied = []
     shared = company_docs()
-    for kind, name, src in attaches:
+    for kind, name, src, as_is in attaches:
         if not src:
             continue
         src = Path(src)
         if kind in shared:
-            dest = company_dir / copy_name(kind, name, src, date)
-            if dest.exists() and filecmp.cmp(src, dest, shallow=False):
-                copied.append(f"{dest.relative_to(company_dir)} (같은 파일이 있어 유지)")
+            same = _same_file_in(company_dir, kind, name, src, as_is)
+            if same:
+                copied.append(f"{same.relative_to(company_dir)} (같은 파일이 있어 유지)")
                 continue
-            dest = unique_path(dest, taken)
+            dest = unique_path(company_dir / copy_name(kind, name, src, date, as_is), taken)
         else:
-            dest = unique_path(folder / copy_name(kind, name, src, date), taken)
+            dest = unique_path(folder / copy_name(kind, name, src, date, as_is), taken)
         shutil.copy2(src, dest)
         copied.append(str(dest.relative_to(company_dir)))
     return copied
