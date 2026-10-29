@@ -43,6 +43,12 @@ class HtmlPaymentTest(unittest.TestCase):
         self.assertIn("4. 구매처 : https://cart.coupang.com/cartView.pang?a=1&amp;b=2", html)
         self.assertNotIn("지급방식", html)
 
+    def test_template_filled(self):
+        """하이웍스 양식 조각의 빈칸이 모두 채워짐"""
+        html = build_html({**DOC, "payment": "", "payment_detail": []}, ITEMS * 3)
+        self.assertNotIn("{{", html)
+        self.assertEqual(html.count("카메라</span>"), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

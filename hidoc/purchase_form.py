@@ -225,14 +225,17 @@ class PurchaseRequestForm(ttk.Frame):
         return copy_name(a["kind"], self._attach_name(a), a["src"], date)
 
     def _attach_values(self, a):
-        line = attach_line(a["kind"], self._attach_name(a), a["count"])
+        # 같은 종류가 여러 개면 '견적서_AMP 1부.'처럼 이름으로 구별, 하나면 '견적서 1부.'
+        same_kind = sum(b["kind"] == a["kind"] for b in self.attaches.values())
+        line = attach_line(a["kind"], a["count"], self._attach_name(a) if same_kind > 1 else "")
         if not a["src"]:
             return line, ""
         return line, f"{Path(a['src']).name}  →  {self._copy_name(a, f'{dt.date.today():%y%m%d}')}"
 
     def _insert_attach(self, a):
-        iid = self.attach_tree.insert("", "end", values=self._attach_values(a))
+        iid = self.attach_tree.insert("", "end")
         self.attaches[iid] = a
+        self._refresh_attach()  # 같은 종류가 늘면 다른 줄 표기도 바뀜
 
     def _refresh_attach(self):
         for iid, a in self.attaches.items():
@@ -286,7 +289,7 @@ class PurchaseRequestForm(ttk.Frame):
         a = self._read_attach()
         if a:
             self.attaches[sel[0]] = a
-            self.attach_tree.item(sel[0], values=self._attach_values(a))
+            self._refresh_attach()
             self.attach_tree.selection_remove(sel)
             self._clear_attach_entry()
 
@@ -307,6 +310,7 @@ class PurchaseRequestForm(ttk.Frame):
         for iid in self.attach_tree.selection():
             self.attach_tree.delete(iid)
             self.attaches.pop(iid, None)
+        self._refresh_attach()
         self._clear_attach_entry()
 
     def _on_attach_select(self, _e):

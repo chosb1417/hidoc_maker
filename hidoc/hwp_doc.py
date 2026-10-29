@@ -191,7 +191,7 @@ def build_hwp(doc: dict, items: list[dict], path, pdf_path=None):
 
         w.line(f"1. 견 적 처 : {doc['vendor']}", left_mm=INDENT_MM)
         vat_note = " VAT포함" if doc.get("vat_note") else ""
-        w.line(f"2. 견적 금액 : 금{total:,}원(금{won_to_korean(total)}원){vat_note}", left_mm=INDENT_MM)
+        w.line(f"2. 견적금액 : 금{total:,}원(금{won_to_korean(total)}원){vat_note}", left_mm=INDENT_MM)
         w.line("3. 견적내역", left_mm=INDENT_MM)
         # 표는 가운데. 단위는 표 오른쪽 끝에 맞춤
         w.line("(단위 : 개, 원)", size=7, align="right", right_mm=(TEXT_WIDTH_MM - sum(COL_MM)) / 2)

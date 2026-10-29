@@ -34,9 +34,10 @@ def company_folders(save_dir=None) -> list[str]:
     return [p.name for p in sorted(folders, key=lambda p: p.stat().st_mtime, reverse=True)]
 
 
-def attach_line(kind: str, name: str, count: int) -> str:
-    """('견적서', '엠에스산업', 1) -> '[견적서]엠에스산업 1부.'"""
-    return f"[{kind}]{name} {count}부."
+def attach_line(kind: str, count: int, name: str = "") -> str:
+    """('견적서', 1) -> '견적서 1부.', ('견적서', 1, 'AMP') -> '견적서_AMP 1부.'
+    이름은 같은 종류가 여러 개라 구별해야 할 때만 넣음 (부르는 쪽에서 판단)"""
+    return f"{kind}_{name} {count}부." if name else f"{kind} {count}부."
 
 
 def safe_filename(text: str) -> str:
